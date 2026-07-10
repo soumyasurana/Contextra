@@ -1,0 +1,72 @@
+[workspace]
+resolver = "2"
+
+members = [
+    # Applications
+    "services/gateway",
+    "services/worker",
+    "services/cli",
+
+    # Libraries
+    "libs/common",
+    "libs/config",
+    "libs/telemetry",
+    "libs/errors",
+    "libs/types",
+    "libs/auth",
+    "libs/storage",
+    "libs/providers",
+    "libs/embeddings",
+    "libs/retrieval",
+    "libs/memory",
+    "libs/context",
+    "libs/prompts",
+    "libs/ingestion",
+    "libs/orchestration",
+    "libs/evaluation",
+]
+
+[workspace.package]
+edition = "2024"
+license = "MIT"
+authors = ["Soumya Surana"]
+repository = "https://github.com/soumyasurana/Contextra"
+
+[workspace.dependencies]
+
+tokio = { version = "1", features = ["full"] }
+
+async-trait = "0.1"
+
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+
+thiserror = "2"
+anyhow = "1"
+
+tracing = "0.1"
+tracing-subscriber = "0.3"
+
+uuid = { version = "1", features = ["v4", "serde"] }
+
+chrono = { version = "0.4", features = ["serde"] }
+
+config = "0.15"
+dotenvy = "0.15"
+
+axum = "0.8"
+tower = "0.5"
+tower-http = "0.6"
+
+utoipa = "5"
+utoipa-swagger-ui = { version = "9", features = ["axum"] }
+
+[workspace.lints.rust]
+unsafe_code = "forbid"
+
+[workspace.lints.clippy]
+unwrap_used = "warn"
+expect_used = "warn"
+panic = "warn"
+todo = "warn"
+dbg_macro = "warn"
