@@ -1,20 +1,14 @@
 # Contextra
 
-<p align="center">
-  <h3 align="center">A Context Engineering Platform for AI Applications</h3>
-</p>
+## A Context Engineering Platform for AI Applications
 
-<p align="center">
-  Build intelligent AI applications by managing the complete lifecycle of context—from knowledge ingestion and semantic retrieval to memory, orchestration, and provider execution.
-</p>
+Build intelligent AI applications by managing the complete lifecycle of context—from knowledge ingestion and semantic retrieval to memory, orchestration, and provider execution.
 
-<p align="center">
 ![Rust](https://img.shields.io/badge/Rust-2024-orange?logo=rust)
 ![License](https://img.shields.io/badge/license-MIT-blue)
 ![Status](https://img.shields.io/badge/status-Active%20Development-success)
-![Architecture](https://img.shields.io/badge/Architecture-Modular%20Workspace-blueviolet)
+![Architecture](https://img.shields.io/badgeArchitecture-Modular%20Workspace-blueviolet)
 ![Microservices](https://img.shields.io/badge/Future-Microservices-informational)
-</p>
 
 ---
 
