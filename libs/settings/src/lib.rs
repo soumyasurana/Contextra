@@ -1,8 +1,8 @@
-mod config;
 mod error;
+mod settings;
 
-pub use config::*;
 pub use error::*;
+pub use settings::*;
 
 use config::{Config, Environment};
 

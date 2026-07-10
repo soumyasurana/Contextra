@@ -9,7 +9,7 @@ members = [
 
     # Libraries
     "libs/common",
-    "libs/config",
+    "libs/settings",
     "libs/telemetry",
     "libs/errors",
     "libs/types",
