@@ -1,14 +1,17 @@
-pub fn add(left: u64, right: u64) -> u64 {
-    left + right
-}
+mod config;
+mod error;
 
-#[cfg(test)]
-mod tests {
-    use super::*;
+pub use config::*;
+pub use error::*;
 
-    #[test]
-    fn it_works() {
-        let result = add(2, 2);
-        assert_eq!(result, 4);
-    }
+use config::{Config, Environment};
+
+pub fn load() -> Result<AppConfig, ConfigError> {
+    dotenvy::dotenv().ok();
+
+    let config = Config::builder()
+        .add_source(Environment::default().separator("_"))
+        .build()?;
+
+    Ok(config.try_deserialize()?)
 }

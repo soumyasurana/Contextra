@@ -1,47 +1,40 @@
 # Contextra
 
-## A Context Engineering Platform for AI Applications
+## A Production-Grade Context Engineering Platform for AI Applications
 
-Build intelligent AI applications by managing the complete lifecycle of context—from knowledge ingestion and semantic retrieval to memory, orchestration, and provider execution.
+Build intelligent AI applications by managing the complete lifecycle of context—from document ingestion and semantic retrieval to memory, orchestration, and provider execution.
 
 ![Rust](https://img.shields.io/badge/Rust-2024-orange?logo=rust)
-![License](https://img.shields.io/badge/license-MIT-blue)
-![Status](https://img.shields.io/badge/status-Active%20Development-success)
-![Architecture](https://img.shields.io/badgeArchitecture-Modular%20Workspace-blueviolet)
-![Microservices](https://img.shields.io/badge/Future-Microservices-informational)
+![License](https://img.shields.io/badge/License-MIT-blue)
+![Status](https://img.shields.io/badge/Status-Active%20Development-success)
+![Architecture](https://img.shields.io/badge/Architecture-Modular%20Workspace-blueviolet)
+![Future](https://img.shields.io/badge/Future-Microservices-informational)
+
+> A modular Rust platform for building context-aware AI systems through document ingestion, semantic retrieval, memory management, prompt orchestration, and multi-provider LLM integration.
 
 ---
 
-## Overview
+# Overview
 
-Contextra is a modular, high-performance platform for building AI-powered applications.
+Contextra is a production-grade AI context engineering platform built in Rust.
 
-Unlike traditional Retrieval-Augmented Generation (RAG) frameworks, Contextra treats **context** as a first-class engineering problem.
+Unlike traditional Retrieval-Augmented Generation (RAG) frameworks that focus primarily on retrieval, Contextra treats **context** as a first-class engineering problem. It provides reusable infrastructure for constructing, optimizing, and managing context throughout the entire lifecycle of an AI application.
 
-It provides reusable infrastructure for:
-
-- Document ingestion
-- Semantic retrieval
-- Long-term memory
-- Prompt management
-- Context optimization
-- AI provider abstraction
-- Workflow orchestration
-
-The platform is implemented in **Rust** and follows a modular workspace architecture designed to evolve into independently deployable microservices.
+The platform is designed as a modular Rust workspace that can evolve into independently deployable microservices while maintaining reusable business logic through shared libraries.
 
 ---
 
 # Why Contextra?
 
-Most AI frameworks focus on one part of the pipeline.
+Most AI frameworks solve isolated problems.
 
 Examples include:
 
 - Retrieval
 - Vector databases
-- Prompt templates
+- Prompt templating
 - Agent execution
+- Workflow automation
 
 Contextra focuses on **the complete context lifecycle**.
 
@@ -53,11 +46,113 @@ Contextra asks:
 
 > "What is the best possible context for this model given everything the system knows?"
 
-That shift makes retrieval only one component of a much larger Context Engineering Platform.
+Retrieval therefore becomes only one component of a much larger Context Engineering Platform.
 
 ---
 
-# Architecture
+# Getting Started
+
+> **Note**
+>
+> Contextra is under active development. The project architecture and workspace are stable while the core libraries are being implemented.
+
+## Prerequisites
+
+- Rust 1.90+
+- Cargo
+
+## Clone
+
+```bash
+git clone https://github.com/soumyasurana/Contextra.git
+cd Contextra
+````
+
+## Build
+
+```bash
+cargo build
+```
+
+## Run tests
+
+```bash
+cargo test
+```
+
+---
+
+# Project Status
+
+**Legend:** ✅ Complete · ⏳ In Progress
+
+* ✅ Workspace architecture
+* ✅ Repository organization
+* ✅ Documentation
+* ⏳ Foundation libraries
+* ⏳ Configuration system
+* ⏳ Telemetry
+* ⏳ Storage layer
+* ⏳ Provider abstraction
+* ⏳ Embeddings
+* ⏳ Retrieval
+* ⏳ Memory
+* ⏳ Context Engine
+* ⏳ Gateway
+* ⏳ SDKs
+
+---
+
+# Core Capabilities
+
+### Context Engine
+
+* Context assembly
+* Context optimization
+* Context ranking
+* Prompt optimization
+
+### Retrieval
+
+* Semantic retrieval
+* Hybrid retrieval
+* Metadata filtering
+* Result reranking
+
+### Memory
+
+* Short-term memory
+* Long-term memory
+* Episodic memory
+* Semantic memory
+
+### Provider Abstraction
+
+Planned providers include:
+
+* OpenAI
+* Anthropic
+* Google Gemini
+* Ollama
+* Voyage AI
+
+### Storage
+
+* PostgreSQL
+* Redis
+* Qdrant
+* Blob Storage
+
+### Observability
+
+* Structured logging
+* OpenTelemetry
+* Metrics
+* Distributed tracing
+
+---
+
+# Target Architecture
 
 ```text
                    Client Applications
@@ -80,60 +175,9 @@ That shift makes retrieval only one component of a much larger Context Engineeri
                     Storage
 ```
 
-Business logic is implemented inside reusable libraries.
+Business logic resides inside reusable libraries.
 
-Services remain thin wrappers around those libraries.
-
----
-
-# Features
-
-## Context Engine
-
-- Context assembly
-- Context ranking
-- Context compression
-- Prompt optimization
-
-## Retrieval
-
-- Semantic retrieval
-- Hybrid retrieval
-- Metadata filtering
-- Result reranking
-
-## Memory
-
-- Short-term memory
-- Long-term memory
-- Episodic memory
-- Semantic memory
-
-## Provider Abstraction
-
-Supports multiple providers through common interfaces.
-
-Planned integrations include:
-
-- OpenAI
-- Anthropic
-- Google Gemini
-- Ollama
-- Voyage AI
-
-## Storage
-
-- PostgreSQL
-- Redis
-- Qdrant
-- Blob storage
-
-## Observability
-
-- Structured logging
-- Distributed tracing
-- OpenTelemetry
-- Metrics
+Services remain lightweight wrappers around those libraries.
 
 ---
 
@@ -152,204 +196,121 @@ docs/
 tests/
 ```
 
-## Services
+### Services
 
 Deployable applications.
 
-Examples:
+* Gateway
+* Worker
+* CLI
 
-- Gateway
-- Worker
-- CLI
-
-## Libraries
+### Libraries
 
 Reusable business logic.
 
-Examples:
-
-- Context
-- Retrieval
-- Memory
-- Storage
-- Providers
-- Embeddings
-- Orchestration
-
----
-
-# Project Status
-
-Current development phase:
-
-```text
-Phase 1
-
-✓ Workspace
-✓ Documentation
-✓ Architecture
-
-⏳ Foundation Libraries
-
-⏳ Storage
-
-⏳ Providers
-
-⏳ Embeddings
-
-⏳ Retrieval
-
-⏳ Memory
-
-⏳ Context Engine
-
-⏳ Gateway
-
-⏳ SDKs
-```
+* Context
+* Retrieval
+* Memory
+* Providers
+* Embeddings
+* Storage
+* Orchestration
 
 ---
 
 # Technology Stack
 
-## Language
-
-- Rust
-
-## Async Runtime
-
-- Tokio
-
-## HTTP
-
-- Axum
-
-## Configuration
-
-- config-rs
-- dotenvy
-
-## Database
-
-- PostgreSQL
-
-## Cache
-
-- Redis
-
-## Vector Database
-
-- Qdrant
-
-## Observability
-
-- tracing
-- OpenTelemetry
-
-## Serialization
-
-- Serde
-
----
-
-# Documentation
-
-Project documentation is available under the `docs/` directory.
-
-| Document | Description |
-|-----------|-------------|
-| architecture.md | High-level architecture |
-| workspace.md | Workspace organization |
-| libraries.md | Library responsibilities |
-| services.md | Service architecture |
-| context-engine.md | Context Engine |
-| storage.md | Storage layer |
-| providers.md | Provider abstraction |
-| retrieval.md | Retrieval pipeline |
-| memory.md | Memory system |
-| orchestration.md | Workflow execution |
-| api.md | API design |
-| development.md | Development guidelines |
-
----
-
-# Design Principles
-
-Contextra is built around several core principles.
-
-- Context-first architecture
-- Provider independence
-- Modular design
-- Strong typing
-- Storage abstraction
-- Dependency inversion
-- Observability by default
-- Production-ready infrastructure
+| Component       | Technology             |
+| --------------- | ---------------------- |
+| Language        | Rust                   |
+| Async Runtime   | Tokio                  |
+| HTTP            | Axum                   |
+| Configuration   | config-rs, dotenvy     |
+| Database        | PostgreSQL             |
+| Cache           | Redis                  |
+| Vector Database | Qdrant                 |
+| Serialization   | Serde                  |
+| Observability   | tracing, OpenTelemetry |
 
 ---
 
 # Roadmap
 
-## Phase 1
+### Phase 1 — Foundation
 
-Workspace foundation
+* Workspace
+* Documentation
+* Configuration
+* Telemetry
 
-## Phase 2
+### Phase 2 — Storage
 
-Foundation libraries
+* PostgreSQL
+* Redis
+* Blob Storage
+* Qdrant
 
-- Errors
-- Types
-- Configuration
-- Telemetry
+### Phase 3 — AI Infrastructure
 
-## Phase 3
+* Provider abstraction
+* Embeddings
+* Retrieval
+* Memory
 
-Storage layer
+### Phase 4 — Context Engine
 
-## Phase 4
+* Context optimization
+* Prompt orchestration
+* Workflow execution
 
-Provider abstraction
+### Phase 5 — Platform
 
-## Phase 5
+* Gateway
+* SDKs
+* Microservice deployment
 
-Embeddings
+---
 
-## Phase 6
+# Design Decisions
 
-Retrieval
+Some of the architectural principles behind Contextra.
 
-## Phase 7
+* **Why Rust?** Memory safety, predictable performance, and fearless concurrency.
+* **Why Context Engineering?** Context quality has a greater impact on model performance than model selection alone.
+* **Why Modular Libraries?** Shared business logic can be reused across multiple services and SDKs.
+* **Why Provider Abstraction?** Applications should remain independent of any single LLM provider.
 
-Memory
+---
 
-## Phase 8
+# Documentation
 
-Context Engine
+Detailed documentation is available in the `docs/` directory.
 
-## Phase 9
-
-Gateway
-
-## Phase 10
-
-SDKs
+* Architecture
+* Workspace
+* Libraries
+* Services
+* Context Engine
+* Retrieval
+* Memory
+* Storage
+* Providers
+* API
+* Development Guide
 
 ---
 
 # Contributing
 
-Contributions are welcome.
+Contributions, suggestions, and discussions are welcome.
 
 Before contributing, please read:
 
-- `docs/development.md`
-- `docs/architecture.md`
+* `docs/development.md`
+* `docs/architecture.md`
 
 ---
 
 # License
 
-This project is licensed under the MIT License.
-
-See the `LICENSE` file for details.
+This project is licensed under the MIT License. See the [LICENSE](LICENSE) file for details.
