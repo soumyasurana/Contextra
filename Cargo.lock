@@ -33,6 +33,12 @@ dependencies = [
 ]
 
 [[package]]
+name = "bytes"
+version = "1.12.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "fc652a48c352aef3ea3aed32080501cf3ef6ed5da78602a020c991775b0aff04"
+
+[[package]]
 name = "cfg-if"
 version = "1.0.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -147,6 +153,10 @@ dependencies = [
 [[package]]
 name = "errors"
 version = "0.1.0"
+dependencies = [
+ "http",
+ "thiserror",
+]
 
 [[package]]
 name = "evaluation"
@@ -195,6 +205,16 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "824e001ac4f3012dd16a264bec811403a67ca9deb6c102fc5049b32c4574b35f"
 dependencies = [
  "hashbrown 0.16.1",
+]
+
+[[package]]
+name = "http"
+version = "1.4.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "6970f50e31d6fc17d3fa27329444bfa74e196cf62e95052a3f6fee181dba6425"
+dependencies = [
+ "bytes",
+ "itoa",
 ]
 
 [[package]]

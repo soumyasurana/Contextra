@@ -8,7 +8,6 @@ Build intelligent AI applications by managing the complete lifecycle of contextâ
 ![License](https://img.shields.io/badge/License-MIT-blue)
 ![Status](https://img.shields.io/badge/Status-Active%20Development-success)
 ![Architecture](https://img.shields.io/badge/Architecture-Modular%20Workspace-blueviolet)
-![Future](https://img.shields.io/badge/Future-Microservices-informational)
 
 > A modular Rust platform for building context-aware AI systems through document ingestion, semantic retrieval, memory management, prompt orchestration, and multi-provider LLM integration.
 
