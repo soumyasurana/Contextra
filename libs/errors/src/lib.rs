@@ -78,27 +78,72 @@ mod tests {
     #[test]
     fn test_error_codes() {
         assert_eq!(ContextraError::NotFound("test".into()).code(), "NOT_FOUND");
-        assert_eq!(ContextraError::Validation("test".into()).code(), "VALIDATION_ERROR");
-        assert_eq!(ContextraError::Unauthorized("test".into()).code(), "UNAUTHORIZED");
+        assert_eq!(
+            ContextraError::Validation("test".into()).code(),
+            "VALIDATION_ERROR"
+        );
+        assert_eq!(
+            ContextraError::Unauthorized("test".into()).code(),
+            "UNAUTHORIZED"
+        );
         assert_eq!(ContextraError::Forbidden("test".into()).code(), "FORBIDDEN");
         assert_eq!(ContextraError::Conflict("test".into()).code(), "CONFLICT");
-        assert_eq!(ContextraError::RateLimited("test".into()).code(), "RATE_LIMITED");
-        assert_eq!(ContextraError::ProviderError("test".into()).code(), "PROVIDER_ERROR");
-        assert_eq!(ContextraError::StorageError("test".into()).code(), "STORAGE_ERROR");
-        assert_eq!(ContextraError::Internal("test".into()).code(), "INTERNAL_ERROR");
+        assert_eq!(
+            ContextraError::RateLimited("test".into()).code(),
+            "RATE_LIMITED"
+        );
+        assert_eq!(
+            ContextraError::ProviderError("test".into()).code(),
+            "PROVIDER_ERROR"
+        );
+        assert_eq!(
+            ContextraError::StorageError("test".into()).code(),
+            "STORAGE_ERROR"
+        );
+        assert_eq!(
+            ContextraError::Internal("test".into()).code(),
+            "INTERNAL_ERROR"
+        );
     }
 
     #[test]
     fn test_http_status_mapping() {
-        assert_eq!(ContextraError::NotFound("test".into()).http_status(), StatusCode::NOT_FOUND);
-        assert_eq!(ContextraError::Validation("test".into()).http_status(), StatusCode::BAD_REQUEST);
-        assert_eq!(ContextraError::Unauthorized("test".into()).http_status(), StatusCode::UNAUTHORIZED);
-        assert_eq!(ContextraError::Forbidden("test".into()).http_status(), StatusCode::FORBIDDEN);
-        assert_eq!(ContextraError::Conflict("test".into()).http_status(), StatusCode::CONFLICT);
-        assert_eq!(ContextraError::RateLimited("test".into()).http_status(), StatusCode::TOO_MANY_REQUESTS);
-        assert_eq!(ContextraError::ProviderError("test".into()).http_status(), StatusCode::BAD_GATEWAY);
-        assert_eq!(ContextraError::StorageError("test".into()).http_status(), StatusCode::INTERNAL_SERVER_ERROR);
-        assert_eq!(ContextraError::Internal("test".into()).http_status(), StatusCode::INTERNAL_SERVER_ERROR);
+        assert_eq!(
+            ContextraError::NotFound("test".into()).http_status(),
+            StatusCode::NOT_FOUND
+        );
+        assert_eq!(
+            ContextraError::Validation("test".into()).http_status(),
+            StatusCode::BAD_REQUEST
+        );
+        assert_eq!(
+            ContextraError::Unauthorized("test".into()).http_status(),
+            StatusCode::UNAUTHORIZED
+        );
+        assert_eq!(
+            ContextraError::Forbidden("test".into()).http_status(),
+            StatusCode::FORBIDDEN
+        );
+        assert_eq!(
+            ContextraError::Conflict("test".into()).http_status(),
+            StatusCode::CONFLICT
+        );
+        assert_eq!(
+            ContextraError::RateLimited("test".into()).http_status(),
+            StatusCode::TOO_MANY_REQUESTS
+        );
+        assert_eq!(
+            ContextraError::ProviderError("test".into()).http_status(),
+            StatusCode::BAD_GATEWAY
+        );
+        assert_eq!(
+            ContextraError::StorageError("test".into()).http_status(),
+            StatusCode::INTERNAL_SERVER_ERROR
+        );
+        assert_eq!(
+            ContextraError::Internal("test".into()).http_status(),
+            StatusCode::INTERNAL_SERVER_ERROR
+        );
     }
 
     #[test]
@@ -107,7 +152,8 @@ mod tests {
         let err: ContextraError = not_found_io.into();
         assert!(matches!(err, ContextraError::NotFound(_)));
 
-        let permission_io = std::io::Error::new(std::io::ErrorKind::PermissionDenied, "access denied");
+        let permission_io =
+            std::io::Error::new(std::io::ErrorKind::PermissionDenied, "access denied");
         let err2: ContextraError = permission_io.into();
         assert!(matches!(err2, ContextraError::Forbidden(_)));
 
