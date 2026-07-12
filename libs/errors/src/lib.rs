@@ -157,7 +157,7 @@ mod tests {
         let err2: ContextraError = permission_io.into();
         assert!(matches!(err2, ContextraError::Forbidden(_)));
 
-        let other_io = std::io::Error::new(std::io::ErrorKind::Other, "something else");
+        let other_io = std::io::Error::other("something else");
         let err3: ContextraError = other_io.into();
         assert!(matches!(err3, ContextraError::Internal(_)));
     }
