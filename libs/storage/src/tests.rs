@@ -35,10 +35,7 @@ async fn test_integration_crud() -> Result<(), Box<dyn std::error::Error>> {
 
     doc_repo.create(&doc).await?;
 
-    let fetched_doc = doc_repo
-        .get(&doc.id)
-        .await?
-        .ok_or("Document not found")?;
+    let fetched_doc = doc_repo.get(&doc.id).await?.ok_or("Document not found")?;
 
     assert_eq!(doc, fetched_doc);
 
@@ -83,16 +80,11 @@ async fn test_integration_crud() -> Result<(), Box<dyn std::error::Error>> {
 
     conv_repo.create(&msg).await?;
 
-    let fetched_msg = conv_repo
-        .get(&msg.id)
-        .await?
-        .ok_or("Message not found")?;
+    let fetched_msg = conv_repo.get(&msg.id).await?.ok_or("Message not found")?;
 
     assert_eq!(msg, fetched_msg);
 
-    let messages = conv_repo
-        .get_messages_by_conversation(&conv_id)
-        .await?;
+    let messages = conv_repo.get_messages_by_conversation(&conv_id).await?;
 
     assert_eq!(messages.len(), 1);
     assert_eq!(messages[0], msg);
