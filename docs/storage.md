@@ -115,6 +115,10 @@ Redis provides temporary storage for:
 
 Cached data is considered disposable.
 
+The cache layer exposes a generic `Cache` trait and a `RedisCache` implementation.
+`SessionStore` builds on top of that cache interface to store per-conversation
+session state with a TTL.
+
 ---
 
 ## Blob Storage

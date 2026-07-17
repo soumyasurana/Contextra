@@ -1,9 +1,13 @@
+use crate::cache::{Cache, RedisCache};
 use crate::conversation::ConversationRepository;
 use crate::db::PgPool;
 use crate::document::DocumentRepository;
 use crate::repository::Repository;
+use crate::session_store::SessionStore;
+use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::env;
+use std::time::Duration;
 use types::{Chunk, CollectionId, ConversationId, Document, DocumentId, Message, Role};
 use uuid::Uuid;
 
@@ -98,6 +102,83 @@ async fn test_integration_crud() -> Result<(), Box<dyn std::error::Error>> {
 
     let deleted_msg = conv_repo.get(&msg.id).await?;
     assert!(deleted_msg.is_none());
+
+    Ok(())
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+struct SessionState {
+    turn: u32,
+    prompt: String,
+    tags: Vec<String>,
+}
+
+async fn redis_cache() -> Result<RedisCache, Box<dyn std::error::Error>> {
+    let redis_url = match env::var("REDIS_URL") {
+        Ok(url) => url,
+        Err(_) => {
+            println!("Skipping Redis tests: REDIS_URL not set");
+            return Err("REDIS_URL not set".into());
+        }
+    };
+
+    Ok(RedisCache::connect(&redis_url).await?)
+}
+
+#[tokio::test]
+async fn test_redis_cache_roundtrip() -> Result<(), Box<dyn std::error::Error>> {
+    let cache = match redis_cache().await {
+        Ok(cache) => cache,
+        Err(err) if err.to_string().contains("not set") => return Ok(()),
+        Err(err) => return Err(err),
+    };
+
+    let key = format!("contextra:test:cache:{}", Uuid::now_v7());
+    let value = SessionState {
+        turn: 3,
+        prompt: "hello".to_string(),
+        tags: vec!["cached".to_string(), "session".to_string()],
+    };
+
+    cache
+        .set_with_ttl(&key, &value, Duration::from_secs(60))
+        .await?;
+
+    assert!(cache.exists(&key).await?);
+
+    let fetched: Option<SessionState> = cache.get(&key).await?;
+    assert_eq!(fetched, Some(value));
+
+    cache.delete(&key).await?;
+    assert!(!cache.exists(&key).await?);
+
+    Ok(())
+}
+
+#[tokio::test]
+async fn test_session_store_roundtrip() -> Result<(), Box<dyn std::error::Error>> {
+    let cache = match redis_cache().await {
+        Ok(cache) => cache,
+        Err(err) if err.to_string().contains("not set") => return Ok(()),
+        Err(err) => return Err(err),
+    };
+
+    let store = SessionStore::<_, SessionState>::new(cache, Duration::from_secs(120));
+    let conversation_id = ConversationId::new();
+    let state = SessionState {
+        turn: 7,
+        prompt: "keep this conversation warm".to_string(),
+        tags: vec!["conversation".to_string(), "ttl".to_string()],
+    };
+
+    store.set(&conversation_id, &state).await?;
+    assert!(store.exists(&conversation_id).await?);
+
+    let fetched = store.get(&conversation_id).await?;
+    assert_eq!(fetched, Some(state));
+
+    store.delete(&conversation_id).await?;
+    assert!(!store.exists(&conversation_id).await?);
 
     Ok(())
 }

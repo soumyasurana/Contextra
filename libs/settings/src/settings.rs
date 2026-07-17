@@ -63,11 +63,17 @@ impl Settings {
 
         let run_mode = env::var("CONTEXTRA_ENV").unwrap_or_else(|_| "development".into());
 
-        let builder = Config::builder()
+        let mut builder = Config::builder()
             .add_source(File::with_name("configs/default.toml").required(false))
             .add_source(File::with_name(&format!("configs/{}.toml", run_mode)).required(false))
             .add_source(File::with_name("configs/local.toml").required(false))
             .add_source(Environment::with_prefix(ENV_PREFIX).separator(ENV_SEPARATOR));
+
+        if let Ok(redis_url) = env::var("REDIS_URL")
+            && env::var("CONTEXTRA__REDIS__URL").is_err()
+        {
+            builder = builder.set_override("redis.url", redis_url)?;
+        }
 
         let config = builder.build()?;
         Ok(config.try_deserialize()?)
