@@ -4,6 +4,7 @@ use crate::db::PgPool;
 use crate::document::DocumentRepository;
 use crate::repository::Repository;
 use crate::session_store::SessionStore;
+use crate::vector_store::{InMemoryVectorStore, QdrantVectorStore, VectorRecord, VectorStore};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::env;
@@ -179,6 +180,104 @@ async fn test_session_store_roundtrip() -> Result<(), Box<dyn std::error::Error>
 
     store.delete(&conversation_id).await?;
     assert!(!store.exists(&conversation_id).await?);
+
+    Ok(())
+}
+
+async fn qdrant_store() -> Result<QdrantVectorStore, Box<dyn std::error::Error>> {
+    let qdrant_url = match env::var("QDRANT_URL") {
+        Ok(url) => url,
+        Err(_) => {
+            println!("Skipping Qdrant tests: QDRANT_URL not set");
+            return Err("QDRANT_URL not set".into());
+        }
+    };
+
+    let api_key = env::var("QDRANT_API_KEY").ok();
+    Ok(QdrantVectorStore::connect(&qdrant_url, api_key)?)
+}
+
+#[tokio::test]
+async fn test_in_memory_vector_store_roundtrip() -> Result<(), Box<dyn std::error::Error>> {
+    let store = InMemoryVectorStore::new();
+    let collection = "test-memory-vectors";
+    store.create_collection(collection, 3).await?;
+
+    let record_a = VectorRecord {
+        id: Uuid::now_v7(),
+        embedding: vec![1.0, 0.0, 0.0],
+        payload: [("label".to_string(), serde_json::json!("a"))]
+            .into_iter()
+            .collect(),
+    };
+    let record_b = VectorRecord {
+        id: Uuid::now_v7(),
+        embedding: vec![0.0, 1.0, 0.0],
+        payload: [("label".to_string(), serde_json::json!("b"))]
+            .into_iter()
+            .collect(),
+    };
+
+    store
+        .upsert_vectors(collection, &[record_a.clone(), record_b.clone()])
+        .await?;
+
+    let results = store.search(collection, &[0.9, 0.1, 0.0], 2).await?;
+    assert_eq!(results[0].id, record_a.id);
+    assert_eq!(
+        results[0].payload.get("label"),
+        Some(&serde_json::json!("a"))
+    );
+
+    store.delete_by_id(collection, &[record_a.id]).await?;
+    let results = store.search(collection, &[0.9, 0.1, 0.0], 2).await?;
+    assert_eq!(results.len(), 1);
+    assert_eq!(results[0].id, record_b.id);
+
+    Ok(())
+}
+
+#[tokio::test]
+async fn test_qdrant_vector_store_roundtrip() -> Result<(), Box<dyn std::error::Error>> {
+    let store = match qdrant_store().await {
+        Ok(store) => store,
+        Err(err) if err.to_string().contains("not set") => return Ok(()),
+        Err(err) => return Err(err),
+    };
+
+    let collection = format!("test-vectors-{}", Uuid::now_v7());
+    store.create_collection(&collection, 3).await?;
+
+    let record_a = VectorRecord {
+        id: Uuid::now_v7(),
+        embedding: vec![1.0, 0.0, 0.0],
+        payload: [("label".to_string(), serde_json::json!("a"))]
+            .into_iter()
+            .collect(),
+    };
+    let record_b = VectorRecord {
+        id: Uuid::now_v7(),
+        embedding: vec![0.0, 1.0, 0.0],
+        payload: [("label".to_string(), serde_json::json!("b"))]
+            .into_iter()
+            .collect(),
+    };
+
+    store
+        .upsert_vectors(&collection, &[record_a.clone(), record_b.clone()])
+        .await?;
+
+    let results = store.search(&collection, &[0.9, 0.1, 0.0], 2).await?;
+    assert_eq!(results[0].id, record_a.id);
+    assert_eq!(
+        results[0].payload.get("label"),
+        Some(&serde_json::json!("a"))
+    );
+
+    store.delete_by_id(&collection, &[record_a.id]).await?;
+    let results = store.search(&collection, &[0.9, 0.1, 0.0], 2).await?;
+    assert_eq!(results.len(), 1);
+    assert_eq!(results[0].id, record_b.id);
 
     Ok(())
 }

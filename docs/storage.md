@@ -97,6 +97,10 @@ Supported implementations include:
 - pgvector
 - Chroma
 
+The storage crate now exposes a backend-agnostic `VectorStore` trait, a
+`QdrantVectorStore` implementation, and an `InMemoryVectorStore` mock for unit
+tests.
+
 Only one vector database is required at runtime.
 
 The implementation is selected through configuration.
