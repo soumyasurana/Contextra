@@ -35,8 +35,10 @@ pub struct VectorStoreSettings {
 
 #[derive(Debug, Clone, Deserialize, PartialEq)]
 pub struct ProvidersSettings {
+    pub provider: Option<String>,
     pub openai_api_key: Option<String>,
     pub anthropic_api_key: Option<String>,
+    pub gemini_api_key: Option<String>,
 }
 
 #[derive(Debug, Clone, Deserialize, PartialEq)]
@@ -160,6 +162,7 @@ mod tests {
             url = "http://localhost:8000"
 
             [providers]
+            provider = "openai"
             openai_api_key = "sk-..."
 
             [telemetry]
@@ -190,6 +193,8 @@ mod tests {
             config.providers.anthropic_api_key,
             Some("ant-...".to_string())
         );
+        assert_eq!(config.providers.provider, Some("openai".to_string()));
+        assert_eq!(config.providers.gemini_api_key, None);
 
         Ok(())
     }
