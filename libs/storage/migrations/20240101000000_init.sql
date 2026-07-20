@@ -23,3 +23,11 @@ CREATE TABLE IF NOT EXISTS chunks (
     content TEXT NOT NULL,
     metadata JSONB NOT NULL DEFAULT '{}'
 );
+
+CREATE TABLE IF NOT EXISTS api_keys (
+    key_id VARCHAR(128) PRIMARY KEY,
+    key_hash TEXT NOT NULL,
+    user_id UUID NOT NULL,
+    org_id UUID NOT NULL,
+    scopes JSONB NOT NULL DEFAULT '[]'
+);

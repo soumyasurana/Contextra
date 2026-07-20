@@ -53,6 +53,7 @@ macro_rules! define_id {
 define_id!(DocumentId);
 define_id!(CollectionId);
 define_id!(UserId);
+define_id!(OrgId);
 define_id!(ConversationId);
 
 pub type Metadata = HashMap<String, serde_json::Value>;

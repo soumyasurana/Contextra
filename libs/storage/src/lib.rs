@@ -1,4 +1,5 @@
 pub mod cache;
+pub mod api_key;
 pub mod conversation;
 pub mod db;
 pub mod document;
