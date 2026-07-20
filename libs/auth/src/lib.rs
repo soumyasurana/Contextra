@@ -96,7 +96,11 @@ pub struct JwtSessionManager {
 }
 
 impl JwtSessionManager {
-    pub fn new(secret: impl AsRef<[u8]>, issuer: impl Into<String>, token_ttl: ChronoDuration) -> Self {
+    pub fn new(
+        secret: impl AsRef<[u8]>,
+        issuer: impl Into<String>,
+        token_ttl: ChronoDuration,
+    ) -> Self {
         let secret = secret.as_ref();
         Self {
             encoding_key: EncodingKey::from_secret(secret),
@@ -130,9 +134,8 @@ impl JwtSessionManager {
         let mut validation = Validation::new(Algorithm::HS256);
         validation.set_issuer(&[self.issuer.as_str()]);
 
-        let token_data = decode::<Claims>(token, &self.decoding_key, &validation).map_err(|e| {
-            ContextraError::Unauthorized(format!("Invalid session token: {e}"))
-        })?;
+        let token_data = decode::<Claims>(token, &self.decoding_key, &validation)
+            .map_err(|e| ContextraError::Unauthorized(format!("Invalid session token: {e}")))?;
 
         Ok(AuthContext {
             user_id: UserId::from(token_data.claims.user_id),
@@ -153,9 +156,8 @@ pub fn hash_api_key(api_key: &str) -> Result<String, ContextraError> {
 }
 
 pub fn verify_api_key(api_key: &str, stored_hash: &str) -> Result<bool, ContextraError> {
-    let parsed_hash = PasswordHash::new(stored_hash).map_err(|e| {
-        ContextraError::Internal(format!("Failed to parse API key hash: {e}"))
-    })?;
+    let parsed_hash = PasswordHash::new(stored_hash)
+        .map_err(|e| ContextraError::Internal(format!("Failed to parse API key hash: {e}")))?;
 
     Ok(Argon2::default()
         .verify_password(api_key.as_bytes(), &parsed_hash)
@@ -164,13 +166,14 @@ pub fn verify_api_key(api_key: &str, stored_hash: &str) -> Result<bool, Contextr
 
 pub fn split_api_key(raw_key: &str) -> Result<(&str, &str), ContextraError> {
     raw_key.split_once('.').ok_or_else(|| {
-        ContextraError::Unauthorized(
-            "Malformed API key; expected '<key_id>.<secret>'".to_string(),
-        )
+        ContextraError::Unauthorized("Malformed API key; expected '<key_id>.<secret>'".to_string())
     })
 }
 
-pub async fn authenticate_api_key<S>(store: &S, raw_key: &str) -> Result<AuthContext, ContextraError>
+pub async fn authenticate_api_key<S>(
+    store: &S,
+    raw_key: &str,
+) -> Result<AuthContext, ContextraError>
 where
     S: ApiKeyStore,
 {
@@ -207,11 +210,8 @@ mod tests {
 
     #[test]
     fn jwt_round_trip() -> Result<(), Box<dyn std::error::Error>> {
-        let manager = JwtSessionManager::new(
-            "session-secret",
-            "contextra",
-            ChronoDuration::minutes(30),
-        );
+        let manager =
+            JwtSessionManager::new("session-secret", "contextra", ChronoDuration::minutes(30));
         let context = auth_context();
 
         let token = manager.issue_session_token(&context)?;
