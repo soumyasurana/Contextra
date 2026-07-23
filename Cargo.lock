@@ -2648,6 +2648,17 @@ dependencies = [
 [[package]]
 name = "retrieval"
 version = "0.1.0"
+dependencies = [
+ "async-trait",
+ "embeddings",
+ "errors",
+ "serde",
+ "serde_json",
+ "storage",
+ "tokio",
+ "types",
+ "uuid",
+]
 
 [[package]]
 name = "rfc6979"
