@@ -304,6 +304,17 @@ impl RetrievalFilter {
         Self::default()
     }
 
+    pub fn is_empty(&self) -> bool {
+        self.collection.is_none()
+            && self.user_id.is_none()
+            && self.organization_id.is_none()
+            && self.language.is_none()
+            && self.file_type.is_none()
+            && self.tags.is_empty()
+            && self.permissions.is_empty()
+            && self.metadata.is_empty()
+    }
+
     pub fn matches(&self, payload: &Metadata) -> bool {
         self.matches_scalar(payload, "collection", self.collection.as_deref())
             && self.matches_scalar(payload, "user_id", self.user_id.as_deref())
@@ -403,6 +414,7 @@ pub enum RetrievalMode {
     #[default]
     Semantic,
     Keyword,
+    Metadata,
     Hybrid,
 }
 
@@ -448,6 +460,16 @@ impl RetrievalRequest {
             filter: RetrievalFilter::default(),
         }
     }
+
+    pub fn metadata(query: impl Into<String>, collection: impl Into<String>, limit: usize) -> Self {
+        Self {
+            query: query.into(),
+            collection: collection.into(),
+            mode: RetrievalMode::Metadata,
+            limit,
+            filter: RetrievalFilter::default(),
+        }
+    }
 }
 
 fn default_limit() -> usize {
@@ -461,6 +483,10 @@ pub struct RetrievedDocument {
     pub semantic_score: Option<f32>,
     pub keyword_score: Option<f32>,
     #[serde(default)]
+    pub metadata_score: Option<f32>,
+    #[serde(default)]
+    pub fusion_score: Option<f32>,
+    #[serde(default)]
     pub payload: Metadata,
 }
 
@@ -470,6 +496,77 @@ pub trait Retriever: Send + Sync {
         &self,
         request: RetrievalRequest,
     ) -> Result<Vec<RetrievedDocument>, ContextraError>;
+}
+
+#[derive(Debug, Clone)]
+pub struct HybridRetriever<R> {
+    retriever: R,
+    rrf_k: f32,
+    candidate_multiplier: usize,
+}
+
+impl<R> HybridRetriever<R> {
+    pub fn new(retriever: R) -> Self {
+        Self {
+            retriever,
+            rrf_k: 60.0,
+            candidate_multiplier: 4,
+        }
+    }
+
+    pub fn with_rrf_k(mut self, rrf_k: f32) -> Self {
+        self.rrf_k = rrf_k.max(1.0);
+        self
+    }
+
+    pub fn with_candidate_multiplier(mut self, multiplier: usize) -> Self {
+        self.candidate_multiplier = multiplier.max(1);
+        self
+    }
+
+    fn candidate_limit(&self, request_limit: usize) -> usize {
+        request_limit
+            .max(1)
+            .saturating_mul(self.candidate_multiplier)
+    }
+}
+
+#[async_trait]
+impl<R> Retriever for HybridRetriever<R>
+where
+    R: Retriever + Send + Sync,
+{
+    async fn retrieve(
+        &self,
+        request: RetrievalRequest,
+    ) -> Result<Vec<RetrievedDocument>, ContextraError> {
+        let limit = request.limit.max(1);
+        let candidate_limit = self.candidate_limit(limit);
+
+        let mut semantic_request = request.clone();
+        semantic_request.mode = RetrievalMode::Semantic;
+        semantic_request.limit = candidate_limit;
+
+        let mut keyword_request = request.clone();
+        keyword_request.mode = RetrievalMode::Keyword;
+        keyword_request.limit = candidate_limit;
+
+        let mut lists = vec![
+            self.retriever.retrieve(semantic_request).await?,
+            self.retriever.retrieve(keyword_request).await?,
+        ];
+
+        if !request.filter.is_empty() {
+            let mut metadata_request = request;
+            metadata_request.mode = RetrievalMode::Metadata;
+            metadata_request.limit = candidate_limit;
+            lists.push(self.retriever.retrieve(metadata_request).await?);
+        }
+
+        let mut fused = reciprocal_rank_fusion(lists, self.rrf_k);
+        fused.truncate(limit);
+        Ok(fused)
+    }
 }
 
 #[derive(Debug, Clone)]
@@ -549,7 +646,9 @@ where
         let query_embedding = self.embed_query(&request.query).await?;
         let vector_limit = match request.mode {
             RetrievalMode::Semantic => self.candidate_limit(limit),
-            RetrievalMode::Keyword | RetrievalMode::Hybrid => self.candidate_limit(limit),
+            RetrievalMode::Keyword | RetrievalMode::Metadata | RetrievalMode::Hybrid => {
+                self.candidate_limit(limit)
+            }
         };
         let candidates = self
             .store
@@ -563,6 +662,7 @@ where
         let mut results = match request.mode {
             RetrievalMode::Semantic => semantic_results(filtered),
             RetrievalMode::Keyword => keyword_results(&request.query, filtered, &self.text_fields),
+            RetrievalMode::Metadata => metadata_results(&request.filter, filtered),
             RetrievalMode::Hybrid => hybrid_results(
                 &request.query,
                 filtered,
@@ -575,6 +675,348 @@ where
         sort_retrieved(&mut results);
         results.truncate(limit);
         Ok(results)
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct RankedChunk {
+    pub id: Uuid,
+    pub score: f32,
+    pub content: String,
+    #[serde(default)]
+    pub semantic_score: Option<f32>,
+    #[serde(default)]
+    pub keyword_score: Option<f32>,
+    #[serde(default)]
+    pub metadata_score: Option<f32>,
+    #[serde(default)]
+    pub fusion_score: Option<f32>,
+    #[serde(default)]
+    pub rerank_score: Option<f32>,
+    #[serde(default)]
+    pub embedding: Option<Vec<f32>>,
+    #[serde(default)]
+    pub payload: Metadata,
+}
+
+impl RankedChunk {
+    pub fn from_retrieved(document: RetrievedDocument) -> Self {
+        let text_fields = DEFAULT_TEXT_FIELDS
+            .iter()
+            .map(|field| (*field).to_string())
+            .collect::<Vec<_>>();
+        let content = payload_text(&document.payload, &text_fields);
+        let embedding = payload_embedding(&document.payload, "embedding");
+
+        Self {
+            id: document.id,
+            score: document.score,
+            content,
+            semantic_score: document.semantic_score,
+            keyword_score: document.keyword_score,
+            metadata_score: document.metadata_score,
+            fusion_score: document.fusion_score,
+            rerank_score: None,
+            embedding,
+            payload: document.payload,
+        }
+    }
+}
+
+#[async_trait]
+pub trait Reranker: Send + Sync {
+    async fn rerank(
+        &self,
+        query: &str,
+        chunks: Vec<RankedChunk>,
+    ) -> Result<Vec<RankedChunk>, ContextraError>;
+}
+
+#[derive(Debug, Clone)]
+pub struct LocalReranker {
+    text_fields: Vec<String>,
+    candidate_weight: f32,
+    lexical_weight: f32,
+}
+
+impl LocalReranker {
+    pub fn new() -> Self {
+        Self {
+            text_fields: DEFAULT_TEXT_FIELDS
+                .iter()
+                .map(|field| (*field).to_string())
+                .collect(),
+            candidate_weight: 0.35,
+            lexical_weight: 0.65,
+        }
+    }
+
+    pub fn with_text_fields(mut self, fields: impl IntoIterator<Item = impl Into<String>>) -> Self {
+        self.text_fields = fields.into_iter().map(Into::into).collect();
+        self
+    }
+
+    pub fn with_weights(mut self, candidate_weight: f32, lexical_weight: f32) -> Self {
+        self.candidate_weight = candidate_weight.max(0.0);
+        self.lexical_weight = lexical_weight.max(0.0);
+        self
+    }
+}
+
+impl Default for LocalReranker {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+#[async_trait]
+impl Reranker for LocalReranker {
+    async fn rerank(
+        &self,
+        query: &str,
+        chunks: Vec<RankedChunk>,
+    ) -> Result<Vec<RankedChunk>, ContextraError> {
+        let query_tokens = tokenize(&normalize_query_text(query));
+        let query_terms = query_tokens.iter().cloned().collect::<HashSet<_>>();
+        let max_candidate_score = chunks
+            .iter()
+            .map(|chunk| chunk.score)
+            .fold(0.0_f32, f32::max);
+        let total_weight = (self.candidate_weight + self.lexical_weight).max(f32::EPSILON);
+
+        let mut reranked = chunks
+            .into_iter()
+            .map(|mut chunk| {
+                let text = if chunk.content.is_empty() {
+                    payload_text(&chunk.payload, &self.text_fields)
+                } else {
+                    chunk.content.clone()
+                };
+                let text_tokens = tokenize(&normalize_query_text(&text));
+                let lexical_score = lexical_relevance(&query_terms, &text_tokens);
+                let candidate_score = if max_candidate_score > 0.0 {
+                    chunk.score / max_candidate_score
+                } else {
+                    0.0
+                };
+                let rerank_score = ((candidate_score * self.candidate_weight)
+                    + (lexical_score * self.lexical_weight))
+                    / total_weight;
+
+                chunk.rerank_score = Some(rerank_score);
+                chunk.score = rerank_score;
+                chunk
+            })
+            .collect::<Vec<_>>();
+
+        sort_ranked_chunks(&mut reranked);
+        Ok(reranked)
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub enum RemoteRerankerProvider {
+    Cohere,
+    Custom(String),
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct RemoteReranker {
+    provider: RemoteRerankerProvider,
+    model: String,
+}
+
+impl RemoteReranker {
+    pub fn cohere(model: impl Into<String>) -> Self {
+        Self {
+            provider: RemoteRerankerProvider::Cohere,
+            model: model.into(),
+        }
+    }
+
+    pub fn custom(provider: impl Into<String>, model: impl Into<String>) -> Self {
+        Self {
+            provider: RemoteRerankerProvider::Custom(provider.into()),
+            model: model.into(),
+        }
+    }
+}
+
+#[async_trait]
+impl Reranker for RemoteReranker {
+    async fn rerank(
+        &self,
+        _query: &str,
+        _chunks: Vec<RankedChunk>,
+    ) -> Result<Vec<RankedChunk>, ContextraError> {
+        Err(ContextraError::ProviderError(format!(
+            "remote reranker provider {:?} with model '{}' is not configured yet",
+            self.provider, self.model
+        )))
+    }
+}
+
+#[derive(Debug, Clone)]
+pub struct Deduplicator {
+    similarity_threshold: f32,
+}
+
+impl Deduplicator {
+    pub fn new(similarity_threshold: f32) -> Self {
+        Self {
+            similarity_threshold: similarity_threshold.clamp(0.0, 1.0),
+        }
+    }
+
+    pub fn deduplicate(&self, chunks: Vec<RankedChunk>) -> Vec<RankedChunk> {
+        let mut kept = Vec::new();
+        let mut exact_texts = HashSet::new();
+
+        for chunk in chunks {
+            let normalized_text = normalize_query_text(&chunk.content);
+            if !normalized_text.is_empty() && !exact_texts.insert(normalized_text) {
+                continue;
+            }
+
+            if kept
+                .iter()
+                .any(|kept_chunk| self.is_near_duplicate(&chunk, kept_chunk))
+            {
+                continue;
+            }
+
+            kept.push(chunk);
+        }
+
+        kept
+    }
+
+    fn is_near_duplicate(&self, left: &RankedChunk, right: &RankedChunk) -> bool {
+        let (Some(left_embedding), Some(right_embedding)) =
+            (left.embedding.as_deref(), right.embedding.as_deref())
+        else {
+            return false;
+        };
+
+        cosine_similarity(left_embedding, right_embedding) >= self.similarity_threshold
+    }
+}
+
+impl Default for Deduplicator {
+    fn default() -> Self {
+        Self::new(0.97)
+    }
+}
+
+#[derive(Debug, Clone)]
+pub struct RetrievalPipeline<Ret, Rerank, Expand = StaticTermExpansionProvider> {
+    analyzer: QueryAnalyzer,
+    expander: QueryExpander<Expand>,
+    retriever: Ret,
+    reranker: Rerank,
+    deduplicator: Deduplicator,
+    default_collection: String,
+    filter: RetrievalFilter,
+    limit: usize,
+}
+
+impl<Ret, Rerank> RetrievalPipeline<Ret, Rerank, StaticTermExpansionProvider> {
+    pub fn new(
+        retriever: Ret,
+        reranker: Rerank,
+        default_collection: impl Into<String>,
+        limit: usize,
+    ) -> Self {
+        let default_collection = default_collection.into();
+        Self {
+            analyzer: QueryAnalyzer::new([default_collection.clone()]),
+            expander: QueryExpander::new(),
+            retriever,
+            reranker,
+            deduplicator: Deduplicator::default(),
+            default_collection,
+            filter: RetrievalFilter::default(),
+            limit: limit.max(1),
+        }
+    }
+}
+
+impl<Ret, Rerank, Expand> RetrievalPipeline<Ret, Rerank, Expand>
+where
+    Expand: TermExpansionProvider,
+{
+    pub fn with_analyzer(mut self, analyzer: QueryAnalyzer) -> Self {
+        self.analyzer = analyzer;
+        self
+    }
+
+    pub fn with_expander<NextExpand>(
+        self,
+        expander: QueryExpander<NextExpand>,
+    ) -> RetrievalPipeline<Ret, Rerank, NextExpand>
+    where
+        NextExpand: TermExpansionProvider,
+    {
+        RetrievalPipeline {
+            analyzer: self.analyzer,
+            expander,
+            retriever: self.retriever,
+            reranker: self.reranker,
+            deduplicator: self.deduplicator,
+            default_collection: self.default_collection,
+            filter: self.filter,
+            limit: self.limit,
+        }
+    }
+
+    pub fn with_filter(mut self, filter: RetrievalFilter) -> Self {
+        self.filter = filter;
+        self
+    }
+
+    pub fn with_deduplicator(mut self, deduplicator: Deduplicator) -> Self {
+        self.deduplicator = deduplicator;
+        self
+    }
+}
+
+impl<Ret, Rerank, Expand> RetrievalPipeline<Ret, Rerank, Expand>
+where
+    Ret: Retriever + Send + Sync,
+    Rerank: Reranker + Send + Sync,
+    Expand: TermExpansionProvider + Send + Sync,
+{
+    pub async fn run(&self, query: &str) -> Result<Vec<RankedChunk>, ContextraError> {
+        let analyzed = self.analyzer.analyze(query);
+        let expanded = self.expander.expand(&analyzed);
+        let expanded_query = if expanded.terms.is_empty() {
+            analyzed.normalized.clone()
+        } else {
+            expanded.as_search_text()
+        };
+        let collection = analyzed
+            .selected_collections
+            .first()
+            .cloned()
+            .unwrap_or_else(|| self.default_collection.clone());
+
+        let request = RetrievalRequest {
+            query: expanded_query,
+            collection,
+            mode: RetrievalMode::Hybrid,
+            limit: self.limit.saturating_mul(3),
+            filter: self.filter.clone(),
+        };
+
+        let candidates = self.retriever.retrieve(request).await?;
+        let ranked = candidates
+            .into_iter()
+            .map(RankedChunk::from_retrieved)
+            .collect::<Vec<_>>();
+        let reranked = self.reranker.rerank(query, ranked).await?;
+        let mut deduplicated = self.deduplicator.deduplicate(reranked);
+        deduplicated.truncate(self.limit);
+        Ok(deduplicated)
     }
 }
 
@@ -605,6 +1047,8 @@ fn semantic_results(candidates: Vec<VectorSearchResult>) -> Vec<RetrievedDocumen
             score: candidate.score,
             semantic_score: Some(candidate.score),
             keyword_score: None,
+            metadata_score: None,
+            fusion_score: None,
             payload: candidate.payload,
         })
         .collect()
@@ -626,6 +1070,29 @@ fn keyword_results(
                 score,
                 semantic_score: None,
                 keyword_score: Some(score),
+                metadata_score: None,
+                fusion_score: None,
+                payload: candidate.payload,
+            })
+        })
+        .collect()
+}
+
+fn metadata_results(
+    filter: &RetrievalFilter,
+    candidates: Vec<VectorSearchResult>,
+) -> Vec<RetrievedDocument> {
+    candidates
+        .into_iter()
+        .filter_map(|candidate| {
+            let metadata_score = metadata_signal_score(filter, &candidate.payload);
+            (metadata_score > 0.0).then_some(RetrievedDocument {
+                id: candidate.id,
+                score: metadata_score,
+                semantic_score: None,
+                keyword_score: None,
+                metadata_score: Some(metadata_score),
+                fusion_score: None,
                 payload: candidate.payload,
             })
         })
@@ -662,10 +1129,121 @@ fn hybrid_results(
                 score,
                 semantic_score: Some(candidate.score),
                 keyword_score: Some(keyword_score),
+                metadata_score: None,
+                fusion_score: None,
                 payload: candidate.payload,
             }
         })
         .collect()
+}
+
+fn reciprocal_rank_fusion(
+    lists: Vec<Vec<RetrievedDocument>>,
+    rrf_k: f32,
+) -> Vec<RetrievedDocument> {
+    let mut fused: HashMap<Uuid, RetrievedDocument> = HashMap::new();
+    let mut fusion_scores: HashMap<Uuid, f32> = HashMap::new();
+
+    for list in lists {
+        for (rank, document) in list.into_iter().enumerate() {
+            let rank_score = 1.0 / (rrf_k + rank as f32 + 1.0);
+            *fusion_scores.entry(document.id).or_default() += rank_score;
+
+            fused
+                .entry(document.id)
+                .and_modify(|existing| merge_document_signals(existing, &document))
+                .or_insert(document);
+        }
+    }
+
+    let mut results = fused
+        .into_iter()
+        .map(|(id, mut document)| {
+            let fusion_score = fusion_scores.get(&id).copied().unwrap_or_default();
+            document.score = fusion_score;
+            document.fusion_score = Some(fusion_score);
+            document
+        })
+        .collect::<Vec<_>>();
+
+    sort_retrieved(&mut results);
+    results
+}
+
+fn merge_document_signals(existing: &mut RetrievedDocument, incoming: &RetrievedDocument) {
+    existing.semantic_score = max_optional_score(existing.semantic_score, incoming.semantic_score);
+    existing.keyword_score = max_optional_score(existing.keyword_score, incoming.keyword_score);
+    existing.metadata_score = max_optional_score(existing.metadata_score, incoming.metadata_score);
+
+    if incoming.score > existing.score {
+        existing.score = incoming.score;
+        existing.payload = incoming.payload.clone();
+    }
+}
+
+fn max_optional_score(left: Option<f32>, right: Option<f32>) -> Option<f32> {
+    match (left, right) {
+        (Some(left), Some(right)) => Some(left.max(right)),
+        (Some(left), None) => Some(left),
+        (None, Some(right)) => Some(right),
+        (None, None) => None,
+    }
+}
+
+fn metadata_signal_score(filter: &RetrievalFilter, payload: &Metadata) -> f32 {
+    if filter.is_empty() || !filter.matches(payload) {
+        return 0.0;
+    }
+
+    let mut matched = 0_usize;
+    let mut total = 0_usize;
+
+    for (key, expected) in [
+        ("collection", filter.collection.as_deref()),
+        ("user_id", filter.user_id.as_deref()),
+        ("organization_id", filter.organization_id.as_deref()),
+        ("language", filter.language.as_deref()),
+        ("file_type", filter.file_type.as_deref()),
+    ]
+    .into_iter()
+    .filter_map(|(key, expected)| expected.map(|expected| (key, expected)))
+    {
+        total += 1;
+        if metadata_value_matches(payload.get(key), expected) {
+            matched += 1;
+        }
+    }
+
+    for tag in &filter.tags {
+        total += 1;
+        if metadata_value_contains(payload.get("tags"), tag) {
+            matched += 1;
+        }
+    }
+
+    if !filter.permissions.is_empty() {
+        total += 1;
+        if filter
+            .permissions
+            .iter()
+            .any(|permission| metadata_value_contains(payload.get("permissions"), permission))
+        {
+            matched += 1;
+        }
+    }
+
+    for condition in &filter.metadata {
+        total += 1;
+        if condition.matches(payload) {
+            matched += 1;
+        }
+    }
+
+    if total == 0 {
+        0.0
+    } else {
+        matched as f32 / total as f32
+    }
 }
 
 fn bm25_scores(
@@ -743,6 +1321,26 @@ fn sort_retrieved(results: &mut [RetrievedDocument]) {
     });
 }
 
+fn sort_ranked_chunks(chunks: &mut [RankedChunk]) {
+    chunks.sort_by(|left, right| {
+        right
+            .score
+            .partial_cmp(&left.score)
+            .unwrap_or(Ordering::Equal)
+            .then_with(|| left.id.cmp(&right.id))
+    });
+}
+
+fn lexical_relevance(query_terms: &HashSet<String>, text_tokens: &[String]) -> f32 {
+    if query_terms.is_empty() || text_tokens.is_empty() {
+        return 0.0;
+    }
+
+    let text_terms = text_tokens.iter().cloned().collect::<HashSet<_>>();
+    let overlap = query_terms.intersection(&text_terms).count() as f32;
+    overlap / query_terms.len() as f32
+}
+
 fn payload_text(payload: &Metadata, fields: &[String]) -> String {
     fields
         .iter()
@@ -763,8 +1361,40 @@ fn value_text(value: &Value) -> Vec<String> {
     }
 }
 
+fn payload_embedding(payload: &Metadata, field: &str) -> Option<Vec<f32>> {
+    payload.get(field)?.as_array().map(|values| {
+        values
+            .iter()
+            .filter_map(|value| value.as_f64().map(|number| number as f32))
+            .collect::<Vec<_>>()
+    })
+}
+
 fn normalize_similarity(score: f32) -> f32 {
     ((score + 1.0) / 2.0).clamp(0.0, 1.0)
+}
+
+fn cosine_similarity(left: &[f32], right: &[f32]) -> f32 {
+    if left.len() != right.len() || left.is_empty() {
+        return 0.0;
+    }
+
+    let (dot, left_norm, right_norm) = left.iter().zip(right.iter()).fold(
+        (0.0_f32, 0.0_f32, 0.0_f32),
+        |(dot, left_norm, right_norm), (left, right)| {
+            (
+                dot + (left * right),
+                left_norm + (left * left),
+                right_norm + (right * right),
+            )
+        },
+    );
+
+    if left_norm == 0.0 || right_norm == 0.0 {
+        0.0
+    } else {
+        dot / (left_norm.sqrt() * right_norm.sqrt())
+    }
 }
 
 fn detect_intent(original: &str, normalized: &str) -> QueryIntent {
@@ -1201,6 +1831,69 @@ mod tests {
         Ok(())
     }
 
+    #[tokio::test]
+    async fn hybrid_retriever_fuses_semantic_keyword_and_metadata_rankings()
+    -> Result<(), Box<dyn std::error::Error>> {
+        let retriever = HybridRetriever::new(MockModeRetriever).with_rrf_k(1.0);
+        let mut request = RetrievalRequest::hybrid("cache", "docs", 3);
+        request.filter.tags = vec!["preferred".to_string()];
+
+        let results = retriever.retrieve(request).await?;
+
+        assert_eq!(results[0].id, Uuid::from_u128(2));
+        assert_eq!(results[0].semantic_score, Some(0.8));
+        assert_eq!(results[0].keyword_score, Some(0.9));
+        assert_eq!(results[0].metadata_score, Some(1.0));
+        assert!(results[0].fusion_score.is_some());
+        Ok(())
+    }
+
+    #[test]
+    fn deduplicator_removes_exact_duplicates_and_respects_cosine_threshold() {
+        let chunks = vec![
+            ranked_chunk(Uuid::from_u128(1), "same text", 0.9, vec![1.0, 0.0]),
+            ranked_chunk(Uuid::from_u128(2), "same text", 0.8, vec![0.0, 1.0]),
+            ranked_chunk(
+                Uuid::from_u128(3),
+                "same meaning with different words",
+                0.7,
+                vec![0.8, 0.2],
+            ),
+            ranked_chunk(Uuid::from_u128(4), "different chunk", 0.6, vec![0.0, 1.0]),
+        ];
+
+        let aggressive = Deduplicator::new(0.95).deduplicate(chunks.clone());
+        assert_eq!(
+            aggressive.iter().map(|chunk| chunk.id).collect::<Vec<_>>(),
+            vec![Uuid::from_u128(1), Uuid::from_u128(4)]
+        );
+
+        let conservative = Deduplicator::new(0.99).deduplicate(chunks);
+        assert_eq!(
+            conservative
+                .iter()
+                .map(|chunk| chunk.id)
+                .collect::<Vec<_>>(),
+            vec![Uuid::from_u128(1), Uuid::from_u128(3), Uuid::from_u128(4)]
+        );
+    }
+
+    #[tokio::test]
+    async fn retrieval_pipeline_analyzes_retrieves_reranks_and_deduplicates()
+    -> Result<(), Box<dyn std::error::Error>> {
+        let pipeline =
+            RetrievalPipeline::new(MockPipelineRetriever, MockPipelineReranker, "docs", 2)
+                .with_deduplicator(Deduplicator::new(0.95));
+
+        let results = pipeline.run("redis cache invalidation").await?;
+
+        assert_eq!(results.len(), 2);
+        assert_eq!(results[0].id, Uuid::from_u128(10));
+        assert_eq!(results[0].rerank_score, Some(1.0));
+        assert_eq!(results[1].id, Uuid::from_u128(12));
+        Ok(())
+    }
+
     async fn seeded_store() -> Result<InMemoryVectorStore, ContextraError> {
         let store = InMemoryVectorStore::new();
         store.create_collection("docs", 3).await?;
@@ -1257,6 +1950,222 @@ mod tests {
             .into_iter()
             .map(|(key, value)| (key.to_string(), value))
             .collect()
+    }
+
+    fn retrieved_document(
+        id: Uuid,
+        title: &'static str,
+        content: &'static str,
+        score: f32,
+        semantic_score: Option<f32>,
+        keyword_score: Option<f32>,
+        metadata_score: Option<f32>,
+    ) -> RetrievedDocument {
+        RetrievedDocument {
+            id,
+            score,
+            semantic_score,
+            keyword_score,
+            metadata_score,
+            fusion_score: None,
+            payload: metadata([("title", json!(title)), ("content", json!(content))]),
+        }
+    }
+
+    fn ranked_chunk(
+        id: Uuid,
+        content: &'static str,
+        score: f32,
+        embedding: Vec<f32>,
+    ) -> RankedChunk {
+        RankedChunk {
+            id,
+            score,
+            content: content.to_string(),
+            semantic_score: None,
+            keyword_score: None,
+            metadata_score: None,
+            fusion_score: None,
+            rerank_score: None,
+            embedding: Some(embedding),
+            payload: metadata([("content", json!(content))]),
+        }
+    }
+
+    #[derive(Debug, Clone, Copy)]
+    struct MockModeRetriever;
+
+    #[async_trait]
+    impl Retriever for MockModeRetriever {
+        async fn retrieve(
+            &self,
+            request: RetrievalRequest,
+        ) -> Result<Vec<RetrievedDocument>, ContextraError> {
+            let results = match request.mode {
+                RetrievalMode::Semantic => vec![
+                    retrieved_document(
+                        Uuid::from_u128(1),
+                        "A",
+                        "semantic first",
+                        0.9,
+                        Some(0.9),
+                        None,
+                        None,
+                    ),
+                    retrieved_document(
+                        Uuid::from_u128(2),
+                        "B",
+                        "semantic second",
+                        0.8,
+                        Some(0.8),
+                        None,
+                        None,
+                    ),
+                    retrieved_document(
+                        Uuid::from_u128(3),
+                        "C",
+                        "semantic third",
+                        0.7,
+                        Some(0.7),
+                        None,
+                        None,
+                    ),
+                ],
+                RetrievalMode::Keyword => vec![
+                    retrieved_document(
+                        Uuid::from_u128(2),
+                        "B",
+                        "keyword first",
+                        0.9,
+                        None,
+                        Some(0.9),
+                        None,
+                    ),
+                    retrieved_document(
+                        Uuid::from_u128(3),
+                        "C",
+                        "keyword second",
+                        0.8,
+                        None,
+                        Some(0.8),
+                        None,
+                    ),
+                    retrieved_document(
+                        Uuid::from_u128(1),
+                        "A",
+                        "keyword third",
+                        0.7,
+                        None,
+                        Some(0.7),
+                        None,
+                    ),
+                ],
+                RetrievalMode::Metadata => vec![
+                    retrieved_document(
+                        Uuid::from_u128(2),
+                        "B",
+                        "metadata first",
+                        1.0,
+                        None,
+                        None,
+                        Some(1.0),
+                    ),
+                    retrieved_document(
+                        Uuid::from_u128(1),
+                        "A",
+                        "metadata second",
+                        0.8,
+                        None,
+                        None,
+                        Some(0.8),
+                    ),
+                ],
+                RetrievalMode::Hybrid => Vec::new(),
+            };
+
+            Ok(results)
+        }
+    }
+
+    #[derive(Debug, Clone, Copy)]
+    struct MockPipelineRetriever;
+
+    #[async_trait]
+    impl Retriever for MockPipelineRetriever {
+        async fn retrieve(
+            &self,
+            _request: RetrievalRequest,
+        ) -> Result<Vec<RetrievedDocument>, ContextraError> {
+            Ok(vec![
+                RetrievedDocument {
+                    id: Uuid::from_u128(10),
+                    score: 0.2,
+                    semantic_score: Some(0.2),
+                    keyword_score: Some(0.1),
+                    metadata_score: None,
+                    fusion_score: Some(0.2),
+                    payload: metadata([
+                        ("content", json!("Redis cache invalidation guide")),
+                        ("embedding", json!([1.0, 0.0])),
+                    ]),
+                },
+                RetrievedDocument {
+                    id: Uuid::from_u128(11),
+                    score: 0.9,
+                    semantic_score: Some(0.9),
+                    keyword_score: None,
+                    metadata_score: None,
+                    fusion_score: Some(0.9),
+                    payload: metadata([
+                        ("content", json!("Redis cache invalidation guide")),
+                        ("embedding", json!([1.0, 0.0])),
+                    ]),
+                },
+                RetrievedDocument {
+                    id: Uuid::from_u128(12),
+                    score: 0.8,
+                    semantic_score: Some(0.8),
+                    keyword_score: None,
+                    metadata_score: None,
+                    fusion_score: Some(0.8),
+                    payload: metadata([
+                        ("content", json!("Deployment checklist")),
+                        ("embedding", json!([0.0, 1.0])),
+                    ]),
+                },
+            ])
+        }
+    }
+
+    #[derive(Debug, Clone, Copy)]
+    struct MockPipelineReranker;
+
+    #[async_trait]
+    impl Reranker for MockPipelineReranker {
+        async fn rerank(
+            &self,
+            _query: &str,
+            chunks: Vec<RankedChunk>,
+        ) -> Result<Vec<RankedChunk>, ContextraError> {
+            let mut reranked = chunks
+                .into_iter()
+                .map(|mut chunk| {
+                    let score = if chunk.id == Uuid::from_u128(10) {
+                        1.0
+                    } else if chunk.id == Uuid::from_u128(11) {
+                        0.95
+                    } else {
+                        0.5
+                    };
+                    chunk.score = score;
+                    chunk.rerank_score = Some(score);
+                    chunk
+                })
+                .collect::<Vec<_>>();
+
+            sort_ranked_chunks(&mut reranked);
+            Ok(reranked)
+        }
     }
 
     #[derive(Debug, Clone, Copy)]
