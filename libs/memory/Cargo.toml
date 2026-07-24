@@ -4,6 +4,15 @@ version = "0.1.0"
 edition = "2024"
 
 [dependencies]
+async-trait = "0.1"
+errors = { path = "../errors" }
+serde = { workspace = true, features = ["derive"] }
+storage = { path = "../storage" }
+types = { path = "../types" }
+uuid = { workspace = true }
 
 [lints]
 workspace = true
+
+[dev-dependencies]
+tokio = { version = "1", features = ["macros", "rt-multi-thread", "time"] }
