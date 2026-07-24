@@ -1772,8 +1772,12 @@ name = "memory"
 version = "0.1.0"
 dependencies = [
  "async-trait",
+ "embeddings",
  "errors",
+ "providers",
+ "retrieval",
  "serde",
+ "serde_json",
  "storage",
  "tokio",
  "types",

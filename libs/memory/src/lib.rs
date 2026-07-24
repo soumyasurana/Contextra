@@ -1,16 +1,22 @@
 use async_trait::async_trait;
+use embeddings::EmbeddingProvider;
 use errors::ContextraError;
+use providers::{ChatMessage, ChatRequest, LLMProvider};
+use retrieval::RetrievalFilter;
 use serde::{Deserialize, Serialize, de::DeserializeOwned};
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 use storage::cache::Cache;
 use storage::conversation::ConversationRepository;
 use storage::repository::Repository;
 use storage::session_store::SessionStore;
-use types::{ConversationId, Message, Metadata, Role};
+use storage::vector_store::{SearchResult as VectorSearchResult, VectorRecord, VectorStore};
+use types::{ConversationId, Message, Metadata, Role, UserId};
 use uuid::Uuid;
 
 const DEFAULT_CONTEXT_TOKEN_LIMIT: usize = 4_000;
 const DEFAULT_SESSION_TTL: Duration = Duration::from_secs(60 * 60);
+const DEFAULT_MEMORY_COLLECTION: &str = "long-term-memory";
+const DEFAULT_IMPORTANCE_THRESHOLD: f32 = 0.6;
 
 #[async_trait]
 pub trait ConversationHistoryStore: Send + Sync {
@@ -389,6 +395,456 @@ where
     ) -> Result<(), ContextraError> {
         self.session_manager.expire(conversation_id).await
     }
+
+    pub async fn summarize_overflow<S>(
+        &self,
+        conversation_id: &ConversationId,
+        summarizer: &S,
+        previous_summary: Option<&str>,
+    ) -> Result<Option<ConversationSummary>, ContextraError>
+    where
+        S: Summarizer,
+    {
+        let messages = self.history(conversation_id).await?;
+        if self.truncator.token_count(&messages) <= self.truncator.max_tokens() {
+            return Ok(None);
+        }
+
+        let retained = self.truncator.truncate(&messages);
+        let retained_ids = retained
+            .iter()
+            .map(|message| message.id)
+            .collect::<std::collections::HashSet<_>>();
+        let overflow = messages
+            .into_iter()
+            .filter(|message| {
+                !matches!(message.role, Role::System) && !retained_ids.contains(&message.id)
+            })
+            .collect::<Vec<_>>();
+
+        if overflow.is_empty() {
+            return Ok(None);
+        }
+
+        summarizer
+            .summarize(conversation_id, previous_summary, &overflow)
+            .await
+            .map(Some)
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub enum LongTermMemoryKind {
+    Fact,
+    Preference,
+    Summary,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct LongTermMemory {
+    pub id: Uuid,
+    pub user_id: UserId,
+    pub kind: LongTermMemoryKind,
+    pub content: String,
+    pub importance: f32,
+    #[serde(default)]
+    pub metadata: Metadata,
+}
+
+impl LongTermMemory {
+    pub fn new(
+        user_id: UserId,
+        kind: LongTermMemoryKind,
+        content: impl Into<String>,
+        importance: f32,
+        metadata: Metadata,
+    ) -> Self {
+        Self {
+            id: Uuid::now_v7(),
+            user_id,
+            kind,
+            content: content.into(),
+            importance: importance.clamp(0.0, 1.0),
+            metadata,
+        }
+    }
+}
+
+#[async_trait]
+pub trait MemoryStore: Send + Sync {
+    async fn remember(&self, memory: LongTermMemory) -> Result<(), ContextraError>;
+
+    async fn recall(
+        &self,
+        user_id: UserId,
+        query: &str,
+        limit: usize,
+    ) -> Result<Vec<LongTermMemory>, ContextraError>;
+}
+
+#[derive(Debug, Clone)]
+pub struct VectorMemoryStore<S, E> {
+    vector_store: S,
+    embedding_provider: E,
+    collection_name: String,
+}
+
+impl<S, E> VectorMemoryStore<S, E> {
+    pub fn new(vector_store: S, embedding_provider: E) -> Self {
+        Self {
+            vector_store,
+            embedding_provider,
+            collection_name: DEFAULT_MEMORY_COLLECTION.to_string(),
+        }
+    }
+
+    pub fn with_collection(mut self, collection_name: impl Into<String>) -> Self {
+        self.collection_name = collection_name.into();
+        self
+    }
+}
+
+impl<S, E> VectorMemoryStore<S, E>
+where
+    S: VectorStore,
+    E: EmbeddingProvider,
+{
+    pub async fn create_collection(&self) -> Result<(), ContextraError> {
+        self.vector_store
+            .create_collection(&self.collection_name, self.embedding_provider.dimensions())
+            .await
+    }
+}
+
+#[async_trait]
+impl<S, E> MemoryStore for VectorMemoryStore<S, E>
+where
+    S: VectorStore + Send + Sync,
+    E: EmbeddingProvider + Send + Sync,
+{
+    async fn remember(&self, memory: LongTermMemory) -> Result<(), ContextraError> {
+        if memory.content.trim().is_empty() {
+            return Err(ContextraError::Validation(
+                "long-term memory content cannot be empty".to_string(),
+            ));
+        }
+
+        let embedding = self
+            .embedding_provider
+            .embed_batch(std::slice::from_ref(&memory.content))
+            .await
+            .map_err(ContextraError::from)?
+            .into_iter()
+            .next()
+            .ok_or_else(|| {
+                ContextraError::ProviderError(
+                    "embedding provider returned no memory embedding".to_string(),
+                )
+            })?;
+
+        let payload = memory_payload(&memory);
+        self.vector_store
+            .upsert_vectors(
+                &self.collection_name,
+                &[VectorRecord {
+                    id: memory.id,
+                    embedding,
+                    payload,
+                }],
+            )
+            .await
+    }
+
+    async fn recall(
+        &self,
+        user_id: UserId,
+        query: &str,
+        limit: usize,
+    ) -> Result<Vec<LongTermMemory>, ContextraError> {
+        let embedding = self
+            .embedding_provider
+            .embed_batch(&[query.to_string()])
+            .await
+            .map_err(ContextraError::from)?
+            .into_iter()
+            .next()
+            .ok_or_else(|| {
+                ContextraError::ProviderError(
+                    "embedding provider returned no memory query embedding".to_string(),
+                )
+            })?;
+        let filter = RetrievalFilter {
+            user_id: Some(user_id.to_string()),
+            ..RetrievalFilter::default()
+        };
+
+        self.vector_store
+            .search(
+                &self.collection_name,
+                &embedding,
+                limit.max(1).saturating_mul(4),
+            )
+            .await?
+            .into_iter()
+            .filter(|result| filter.matches(&result.payload))
+            .take(limit.max(1))
+            .map(long_term_memory_from_vector_result)
+            .collect()
+    }
+}
+
+#[derive(Debug, Clone)]
+pub struct ImportanceScorer {
+    promotion_threshold: f32,
+}
+
+impl ImportanceScorer {
+    pub fn new(promotion_threshold: f32) -> Self {
+        Self {
+            promotion_threshold: promotion_threshold.clamp(0.0, 1.0),
+        }
+    }
+
+    pub fn score_message(&self, message: &Message) -> f32 {
+        let normalized = message.content.to_lowercase();
+        let mut score: f32 = 0.0;
+
+        if matches!(message.role, Role::User) {
+            score += 0.15;
+        }
+        if contains_any(
+            &normalized,
+            &["remember", "do not forget", "don't forget", "always"],
+        ) {
+            score += 0.45;
+        }
+        if contains_any(
+            &normalized,
+            &["prefer", "preference", "i like", "i dislike", "favorite"],
+        ) {
+            score += 0.35;
+        }
+        if contains_any(
+            &normalized,
+            &["my name is", "i am", "i work", "my role", "my email"],
+        ) {
+            score += 0.3;
+        }
+        if contains_any(&normalized, &["temporary", "for now", "just this once"]) {
+            score -= 0.35;
+        }
+        if message.content.split_whitespace().count() >= 8 {
+            score += 0.1;
+        }
+
+        score.clamp(0.0, 1.0)
+    }
+
+    pub fn should_promote(&self, message: &Message) -> bool {
+        self.score_message(message) >= self.promotion_threshold
+    }
+
+    pub fn classify(&self, message: &Message) -> LongTermMemoryKind {
+        let normalized = message.content.to_lowercase();
+        if contains_any(
+            &normalized,
+            &["prefer", "preference", "i like", "i dislike", "favorite"],
+        ) {
+            LongTermMemoryKind::Preference
+        } else {
+            LongTermMemoryKind::Fact
+        }
+    }
+
+    pub fn promote(&self, user_id: UserId, message: &Message) -> Option<LongTermMemory> {
+        let importance = self.score_message(message);
+        (importance >= self.promotion_threshold).then(|| {
+            LongTermMemory::new(
+                user_id,
+                self.classify(message),
+                message.content.clone(),
+                importance,
+                Metadata::new(),
+            )
+        })
+    }
+}
+
+impl Default for ImportanceScorer {
+    fn default() -> Self {
+        Self::new(DEFAULT_IMPORTANCE_THRESHOLD)
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct ConversationSummary {
+    pub conversation_id: ConversationId,
+    pub content: String,
+    pub summarized_message_ids: Vec<Uuid>,
+}
+
+#[async_trait]
+pub trait Summarizer: Send + Sync {
+    async fn summarize(
+        &self,
+        conversation_id: &ConversationId,
+        previous_summary: Option<&str>,
+        messages: &[Message],
+    ) -> Result<ConversationSummary, ContextraError>;
+}
+
+#[derive(Debug, Clone)]
+pub struct ProviderSummarizer<P> {
+    provider: P,
+    model: String,
+    max_tokens: u32,
+}
+
+impl<P> ProviderSummarizer<P> {
+    pub fn new(provider: P, model: impl Into<String>) -> Self {
+        Self {
+            provider,
+            model: model.into(),
+            max_tokens: 512,
+        }
+    }
+
+    pub fn with_max_tokens(mut self, max_tokens: u32) -> Self {
+        self.max_tokens = max_tokens.max(1);
+        self
+    }
+}
+
+#[async_trait]
+impl<P> Summarizer for ProviderSummarizer<P>
+where
+    P: LLMProvider + Send + Sync,
+{
+    async fn summarize(
+        &self,
+        conversation_id: &ConversationId,
+        previous_summary: Option<&str>,
+        messages: &[Message],
+    ) -> Result<ConversationSummary, ContextraError> {
+        if messages.is_empty() {
+            return Err(ContextraError::Validation(
+                "cannot summarize an empty message set".to_string(),
+            ));
+        }
+
+        let mut request = ChatRequest::new(
+            self.model.clone(),
+            vec![
+                ChatMessage::system(
+                    "Condense older conversation turns into a concise running memory summary. Preserve stable facts, user preferences, decisions, and unresolved tasks.",
+                ),
+                ChatMessage::user(summary_prompt(previous_summary, messages)),
+            ],
+        );
+        request.temperature = Some(0.1);
+        request.max_tokens = Some(self.max_tokens);
+
+        let response = self
+            .provider
+            .chat(request)
+            .await
+            .map_err(ContextraError::from)?;
+        let content = response.message.content.unwrap_or_default();
+
+        Ok(ConversationSummary {
+            conversation_id: *conversation_id,
+            content,
+            summarized_message_ids: messages.iter().map(|message| message.id).collect(),
+        })
+    }
+}
+
+fn memory_payload(memory: &LongTermMemory) -> Metadata {
+    let mut payload = memory.metadata.clone();
+    payload.insert("memory_id".to_string(), serde_json::json!(memory.id));
+    payload.insert(
+        "user_id".to_string(),
+        serde_json::json!(memory.user_id.to_string()),
+    );
+    payload.insert(
+        "kind".to_string(),
+        serde_json::json!(match memory.kind {
+            LongTermMemoryKind::Fact => "fact",
+            LongTermMemoryKind::Preference => "preference",
+            LongTermMemoryKind::Summary => "summary",
+        }),
+    );
+    payload.insert("content".to_string(), serde_json::json!(memory.content));
+    payload.insert(
+        "importance".to_string(),
+        serde_json::json!(memory.importance),
+    );
+    payload
+}
+
+fn long_term_memory_from_vector_result(
+    result: VectorSearchResult,
+) -> Result<LongTermMemory, ContextraError> {
+    let payload = result.payload;
+    let id = payload
+        .get("memory_id")
+        .and_then(|value| value.as_str())
+        .map(Uuid::parse_str)
+        .transpose()
+        .map_err(|error| ContextraError::StorageError(error.to_string()))?
+        .unwrap_or(result.id);
+    let user_id = payload
+        .get("user_id")
+        .and_then(|value| value.as_str())
+        .ok_or_else(|| ContextraError::StorageError("memory payload missing user_id".to_string()))?
+        .parse::<UserId>()
+        .map_err(|error| ContextraError::StorageError(error.to_string()))?;
+    let kind = match payload.get("kind").and_then(|value| value.as_str()) {
+        Some("preference") => LongTermMemoryKind::Preference,
+        Some("summary") => LongTermMemoryKind::Summary,
+        _ => LongTermMemoryKind::Fact,
+    };
+    let content = payload
+        .get("content")
+        .and_then(|value| value.as_str())
+        .ok_or_else(|| ContextraError::StorageError("memory payload missing content".to_string()))?
+        .to_string();
+    let importance = payload
+        .get("importance")
+        .and_then(|value| value.as_f64())
+        .unwrap_or_default() as f32;
+
+    Ok(LongTermMemory {
+        id,
+        user_id,
+        kind,
+        content,
+        importance,
+        metadata: payload,
+    })
+}
+
+fn contains_any(value: &str, needles: &[&str]) -> bool {
+    needles.iter().any(|needle| value.contains(needle))
+}
+
+fn summary_prompt(previous_summary: Option<&str>, messages: &[Message]) -> String {
+    let previous = previous_summary.unwrap_or("No previous summary.");
+    let transcript = messages
+        .iter()
+        .map(|message| {
+            format!(
+                "{:?}: {}",
+                message.role,
+                message.content.replace('\n', " ").trim()
+            )
+        })
+        .collect::<Vec<_>>()
+        .join("\n");
+
+    format!(
+        "Previous running summary:\n{previous}\n\nOlder turns to condense:\n{transcript}\n\nReturn only the updated running summary."
+    )
 }
 
 fn role_token_cost(role: &Role) -> usize {
@@ -410,6 +866,7 @@ fn now_epoch_seconds() -> u64 {
 #[allow(clippy::unwrap_used)]
 mod tests {
     use super::*;
+    use providers::{ChatResponse, ChatStream, ProviderError};
     use std::collections::HashMap;
     use std::sync::Arc;
     use tokio::sync::Mutex;
@@ -507,6 +964,99 @@ mod tests {
         Ok(())
     }
 
+    #[test]
+    fn importance_scoring_respects_promotion_thresholds() {
+        let conversation_id = ConversationId::new();
+        let user_id = UserId::new();
+        let scorer = ImportanceScorer::new(0.6);
+
+        let preference = message(
+            conversation_id,
+            Role::User,
+            "Please remember that I prefer concise Rust examples",
+        );
+        let ephemeral = message(
+            conversation_id,
+            Role::User,
+            "For now use the temporary value just this once",
+        );
+
+        assert!(scorer.score_message(&preference) >= 0.6);
+        assert!(scorer.should_promote(&preference));
+        assert_eq!(scorer.classify(&preference), LongTermMemoryKind::Preference);
+        assert!(scorer.promote(user_id, &preference).is_some());
+
+        assert!(scorer.score_message(&ephemeral) < 0.6);
+        assert!(!scorer.should_promote(&ephemeral));
+        assert!(scorer.promote(user_id, &ephemeral).is_none());
+    }
+
+    #[tokio::test]
+    async fn summarizer_invoked_when_token_window_is_exceeded()
+    -> Result<(), Box<dyn std::error::Error>> {
+        let durable = InMemoryConversationStore::default();
+        let hot = InMemoryHotSessionStore::default();
+        let memory = ConversationMemory::with_truncator(
+            durable.clone(),
+            hot,
+            SlidingWindowTruncator::with_counter(4, WordTokenCounter),
+        );
+        let session = memory.create_session().await?;
+
+        memory
+            .append_message(
+                session.conversation_id,
+                Role::User,
+                "old preference one",
+                Metadata::new(),
+            )
+            .await?;
+        memory
+            .append_message(
+                session.conversation_id,
+                Role::Assistant,
+                "old answer two",
+                Metadata::new(),
+            )
+            .await?;
+        memory
+            .append_message(
+                session.conversation_id,
+                Role::User,
+                "latest request",
+                Metadata::new(),
+            )
+            .await?;
+
+        let provider = MockLlmProvider::default();
+        let summarizer = ProviderSummarizer::new(provider.clone(), "mock-summary");
+
+        let summary = memory
+            .summarize_overflow(
+                &session.conversation_id,
+                &summarizer,
+                Some("existing facts"),
+            )
+            .await?
+            .ok_or_else(|| std::io::Error::other("summary should be produced"))?;
+
+        assert_eq!(summary.conversation_id, session.conversation_id);
+        assert_eq!(summary.content, "updated running summary");
+        assert_eq!(summary.summarized_message_ids.len(), 2);
+        assert_eq!(*provider.calls.lock().await, 1);
+        let prompt = provider
+            .last_prompt
+            .lock()
+            .await
+            .clone()
+            .ok_or_else(|| std::io::Error::other("prompt should be captured"))?;
+        assert!(prompt.contains("existing facts"));
+        assert!(prompt.contains("old preference one"));
+        assert!(!prompt.contains("latest request"));
+
+        Ok(())
+    }
+
     #[derive(Debug, Clone, Default)]
     struct InMemoryConversationStore {
         state: Arc<Mutex<HashMap<ConversationId, Vec<Message>>>>,
@@ -578,6 +1128,42 @@ mod tests {
 
         async fn exists(&self, conversation_id: &ConversationId) -> Result<bool, ContextraError> {
             Ok(self.state.lock().await.contains_key(conversation_id))
+        }
+    }
+
+    #[derive(Debug, Clone, Default)]
+    struct MockLlmProvider {
+        calls: Arc<Mutex<usize>>,
+        last_prompt: Arc<Mutex<Option<String>>>,
+    }
+
+    #[async_trait]
+    impl LLMProvider for MockLlmProvider {
+        async fn chat(&self, request: ChatRequest) -> Result<ChatResponse, ProviderError> {
+            *self.calls.lock().await += 1;
+            *self.last_prompt.lock().await = request
+                .messages
+                .iter()
+                .rev()
+                .find_map(|message| message.content.clone());
+
+            Ok(ChatResponse {
+                id: "summary-response".to_string(),
+                model: request.model,
+                message: ChatMessage::assistant("updated running summary"),
+                finish_reason: Some("stop".to_string()),
+                usage: None,
+            })
+        }
+
+        async fn chat_stream(&self, _request: ChatRequest) -> Result<ChatStream, ProviderError> {
+            Err(ProviderError::UnsupportedProvider(
+                "mock stream unsupported".to_string(),
+            ))
+        }
+
+        fn supports_function_calling(&self) -> bool {
+            false
         }
     }
 
