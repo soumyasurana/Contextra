@@ -386,6 +386,20 @@ dependencies = [
 [[package]]
 name = "context"
 version = "0.1.0"
+dependencies = [
+ "async-trait",
+ "errors",
+ "futures-util",
+ "memory",
+ "prompts",
+ "providers",
+ "retrieval",
+ "serde",
+ "serde_json",
+ "tokio",
+ "types",
+ "uuid",
+]
 
 [[package]]
 name = "convert_case"
