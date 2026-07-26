@@ -3947,6 +3947,7 @@ dependencies = [
  "bytes",
  "futures-core",
  "futures-sink",
+ "futures-util",
  "pin-project-lite",
  "tokio",
 ]
@@ -4750,6 +4751,20 @@ dependencies = [
 [[package]]
 name = "worker"
 version = "0.1.0"
+dependencies = [
+ "async-trait",
+ "errors",
+ "redis",
+ "rstest",
+ "serde",
+ "serde_json",
+ "telemetry",
+ "thiserror 2.0.18",
+ "tokio",
+ "tokio-util",
+ "tracing",
+ "uuid",
+]
 
 [[package]]
 name = "writeable"
