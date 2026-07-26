@@ -18,6 +18,7 @@ use std::convert::Infallible;
 use std::net::SocketAddr;
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
+use tower_http::cors::CorsLayer;
 use tower_http::trace::TraceLayer;
 use types::{CollectionId, ConversationId, DocumentId, Metadata};
 use utoipa::{IntoParams, OpenApi, ToSchema};
@@ -94,6 +95,7 @@ pub fn build_router(state: AppState) -> Router {
             rate_limit_middleware,
         ))
         .layer(TraceLayer::new_for_http())
+        .layer(CorsLayer::permissive())
         .with_state(state)
 }
 

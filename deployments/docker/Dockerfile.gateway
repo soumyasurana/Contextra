@@ -2,10 +2,17 @@ FROM rust:1.90-slim AS builder
 
 WORKDIR /app
 
-# Copy workspace configuration and dependency manifests
+# Install build dependencies
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    pkg-config \
+    libssl-dev \
+    && rm -rf /var/lib/apt/lists/*
+
+# Copy workspace configuration, dependency manifests, and workspace crates
 COPY Cargo.toml Cargo.lock ./
 COPY libs ./libs
 COPY services ./services
+COPY tests ./tests
 
 # Build the gateway binary in release mode
 RUN cargo build --release -p gateway
