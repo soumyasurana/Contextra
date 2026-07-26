@@ -2029,6 +2029,24 @@ dependencies = [
 [[package]]
 name = "orchestration"
 version = "0.1.0"
+dependencies = [
+ "async-trait",
+ "context",
+ "embeddings",
+ "errors",
+ "futures-util",
+ "ingestion",
+ "memory",
+ "prompts",
+ "providers",
+ "retrieval",
+ "serde_json",
+ "storage",
+ "tokio",
+ "tracing",
+ "types",
+ "uuid",
+]
 
 [[package]]
 name = "ordered-multimap"
