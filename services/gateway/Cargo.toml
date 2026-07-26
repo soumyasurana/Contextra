@@ -4,3 +4,22 @@ version = "0.1.0"
 edition = "2024"
 
 [dependencies]
+async-trait = "0.1"
+auth = { path = "../../libs/auth" }
+axum = "0.7"
+common = { path = "../../libs/common" }
+errors = { path = "../../libs/errors" }
+futures-util = "0.3"
+http = { workspace = true }
+orchestration = { path = "../../libs/orchestration" }
+providers = { path = "../../libs/providers" }
+serde = { workspace = true, features = ["derive"] }
+serde_json = { workspace = true }
+tokio = { version = "1", features = ["macros", "rt-multi-thread", "net", "time"] }
+tower = "0.5"
+tower-http = { version = "0.6", features = ["trace"] }
+tracing = "0.1"
+types = { path = "../../libs/types" }
+utoipa = { version = "5", features = ["axum_extras", "uuid"] }
+utoipa-swagger-ui = { version = "8", features = ["axum"] }
+uuid = { workspace = true }
