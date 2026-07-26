@@ -2,391 +2,310 @@
 
 ## Overview
 
-This document defines the development standards for Contextra.
-
-The primary objective is to maintain a codebase that remains modular, testable, observable, and easy to evolve.
-
-Every contribution should preserve the architectural principles described throughout the documentation.
+This document defines the development standards and **local setup instructions** for Contextra.
 
 ---
 
-# Philosophy
+# Quick Start — Local Dev Environment
 
-Contextra follows a simple rule:
+## Prerequisites
 
-> **Business logic belongs in libraries. Transport belongs in services.**
+| Tool | Version | Purpose |
+|------|---------|---------|
+| Rust | ≥ 1.90 | Build the workspace |
+| Docker | ≥ 24 | Run infrastructure services |
+| Docker Compose | ≥ 2.20 | Orchestrate local stack |
+| `curl` / `jq` | any | Manual API testing |
 
-Libraries implement domain behavior.
+## 1. Clone the Repository
 
-Services expose that behavior to users.
-
-This separation must never be violated.
-
----
-
-# Workspace Organization
-
-The repository is organized into four major areas.
-
-```text
-services/
+```bash
+git clone https://github.com/soumyasurana/Contextra.git
+cd Contextra
 ```
 
-Deployable applications.
+## 2. Start Infrastructure Services
 
-Examples:
+Docker Compose brings up PostgreSQL, Redis, and Qdrant in the background:
 
-- Gateway
-- Worker
-- CLI
-
----
-
-```text
-libs/
+```bash
+docker compose -f deployments/docker/docker-compose.yml up -d postgres redis qdrant
 ```
 
-Reusable business logic.
+Wait for all services to become healthy (≈ 10–15 seconds):
 
-Libraries implement:
-
-- Storage
-- Retrieval
-- Memory
-- Context
-- Providers
-- Embeddings
-- Orchestration
-
----
-
-```text
-proto/
+```bash
+docker compose -f deployments/docker/docker-compose.yml ps
 ```
 
-Protocol Buffer definitions.
+All three services should report `healthy`.
 
----
+## 3. Set Environment Variables
 
-```text
-sdk/
+Copy and adapt the example environment file:
+
+```bash
+# Minimum required for local development
+export DATABASE_URL="postgres://postgres:postgrespassword@localhost:5432/contextra"
+export REDIS_URL="redis://localhost:6379"
+export QDRANT_URL="http://localhost:6333"
+export CONTEXTRA_ENV=development
 ```
 
-Official client SDKs.
+Or create a `.env` file in the workspace root — `dotenvy` will load it automatically.
 
----
+## 4. Run Database Migrations
 
-# Library Rules
-
-Every library must satisfy the following principles.
-
-## Single Responsibility
-
-A library owns one domain.
-
-If a feature belongs to multiple domains, create a shared abstraction rather than introducing cross-domain coupling.
-
----
-
-## Transport Independence
-
-Libraries must not depend on:
-
-- Axum
-- Hyper
-- HTTP
-- gRPC
-- CLI
-- Docker
-
-Libraries should be executable inside tests without networking.
-
----
-
-## Dependency Direction
-
-Dependencies always point downward.
-
-```text
-Gateway
-
-↓
-
-Orchestration
-
-↓
-
-Context
-
-↓
-
-Memory
-Retrieval
-
-↓
-
-Embeddings
-
-↓
-
-Providers
-
-↓
-
-Storage
-
-↓
-
-Foundation Libraries
+```bash
+cargo run -p gateway -- migrate   # if a migrate subcommand is wired
+# or manually apply SQL files from migrations/ once they exist
 ```
 
-Circular dependencies are prohibited.
+## 5. Build the Workspace
 
----
-
-## Public API
-
-Every library should expose a small, stable public API.
-
-Implementation details remain private.
-
----
-
-# Services
-
-Services should remain thin.
-
-Responsibilities include:
-
-- Configuration
-- Dependency injection
-- Authentication
-- Middleware
-- Request validation
-- Calling libraries
-
-Business logic belongs in libraries.
-
----
-
-# Error Handling
-
-Every library returns a shared error type.
-
-Avoid:
-
-```rust
-panic!()
-unwrap()
-expect()
+```bash
+cargo build
 ```
 
-Errors should propagate through `Result`.
+This compiles all libraries and services including `gateway`, `worker`, and `contextra` (CLI).
+
+## 6. Start the Gateway Service
+
+```bash
+cargo run -p gateway
+```
+
+The HTTP API is served at `http://127.0.0.1:3000`.
+
+- Swagger UI: [http://127.0.0.1:3000/docs](http://127.0.0.1:3000/docs)
+- OpenAPI JSON: [http://127.0.0.1:3000/api-docs/openapi.json](http://127.0.0.1:3000/api-docs/openapi.json)
+
+## 7. Start the Worker Service
+
+In a separate terminal:
+
+```bash
+cargo run -p worker
+```
+
+Worker configuration (all optional — shown with defaults):
+
+```bash
+REDIS_URL=redis://localhost:6379   # Queue backend
+WORKER_CONCURRENCY=4               # Concurrent job tasks
+WORKER_SWEEP_INTERVAL_SECS=900     # Memory sweep interval (15 min)
+WORKER_LOG_LEVEL=info
+```
 
 ---
 
-# Configuration
+# Using the CLI (`contextra`)
 
-Configuration should never be hardcoded.
+Build the CLI binary:
 
-All configurable values belong in:
+```bash
+cargo build -p cli
+# Binary at: ./target/debug/contextra
+```
 
-- Environment variables
-- TOML configuration
-- Secrets management
+Or install globally:
 
-Libraries should receive configuration through dependency injection.
+```bash
+cargo install --path services/cli
+```
+
+## Ingest a Document
+
+```bash
+# REST mode (sends to Gateway)
+contextra --gateway-url http://127.0.0.1:3000 ingest ./docs/architecture.md
+
+# Local/offline mode (runs entirely in-process — no Gateway needed)
+contextra --local ingest ./docs/architecture.md
+```
+
+## List Collections
+
+```bash
+contextra collections list
+
+# Local mode
+contextra --local collections list
+```
+
+## Chat
+
+```bash
+# Single message
+contextra chat "Explain Contextra's retrieval pipeline"
+
+# Interactive REPL
+contextra chat
+
+# Resume existing conversation
+contextra chat --conversation-id <uuid>
+
+# Local mode (in-process LLM stub)
+contextra --local chat "What is context engineering?"
+```
+
+## Run Evaluation
+
+```bash
+# Default built-in test dataset
+contextra --local eval run
+
+# Custom benchmark dataset
+contextra --local eval run --dataset ./tests/fixtures/benchmark.json --k 5
+```
 
 ---
 
-# Logging
+# Running the Full Stack with Docker Compose
 
-Use structured logging.
+Start every service (Gateway + Worker + all infrastructure):
 
-Every important operation should emit:
+```bash
+docker compose -f deployments/docker/docker-compose.yml up --build
+```
 
-- Request ID
-- Trace ID
-- Duration
-- Status
-- Error (if applicable)
+Stop and remove containers:
 
-Sensitive information must never be logged.
+```bash
+docker compose -f deployments/docker/docker-compose.yml down
+```
+
+Remove volumes (wipe all persisted data):
+
+```bash
+docker compose -f deployments/docker/docker-compose.yml down -v
+```
 
 ---
 
 # Testing
 
-Every feature should include tests.
+## Unit Tests (all workspace packages)
 
-## Unit Tests
-
-Located inside the corresponding library.
-
-Purpose:
-
-- Business logic
-- Algorithms
-- Validation
-
----
-
-## Integration Tests
-
-Located in:
-
-```text
-tests/integration/
+```bash
+cargo test
 ```
 
-Verify interaction between multiple libraries.
+## A Specific Package
 
----
+```bash
+cargo test -p worker
+cargo test -p gateway
+cargo test -p cli
+```
 
 ## End-to-End Tests
 
-Located in:
-
-```text
-tests/e2e/
+```bash
+cargo test -p e2e-tests
 ```
 
-Test complete workflows.
+These tests spin up an in-process Gateway server and exercise:
+- CLI local engine ingestion → chat roundtrip
+- CLI local evaluation pipeline
+- Gateway REST ingest → conversation create → chat roundtrip
 
----
+## Lint and Format
 
-## Benchmarks
-
-Located in:
-
-```text
-tests/benchmarks/
+```bash
+cargo clippy -- -D warnings
+cargo fmt --check
 ```
 
-Measure latency and throughput.
+---
+
+# Philosophy
+
+> **Business logic belongs in libraries. Transport belongs in services.**
+
+Libraries implement domain behaviour. Services expose that behaviour to users. This separation must never be violated.
+
+## Workspace Organization
+
+```text
+services/         Deployable applications (gateway, worker, cli)
+libs/             Reusable domain libraries
+tests/            Integration and end-to-end test suites
+deployments/      Container and infrastructure definitions
+docs/             Architecture and operational documentation
+```
+
+## Library Rules
+
+- **Single Responsibility**: one library, one domain
+- **Transport Independence**: no HTTP/gRPC imports in libraries
+- **Dependency Direction**: always downward (no circular deps)
+- **Public API**: small, stable, well-documented
 
 ---
 
-# Code Style
+# Error Handling
 
-Use:
+Every library returns `Result`. Avoid:
 
-- `cargo fmt`
-- `cargo clippy`
-
-Every commit should compile cleanly.
-
-Warnings should be treated as bugs whenever practical.
+```rust
+panic!()
+unwrap()   // only in tests with #[allow(clippy::unwrap_used)]
+expect()   // only in tests with #[allow(clippy::expect_used)]
+```
 
 ---
 
-# Documentation
+# Configuration
 
-Public APIs require documentation.
+All configurable values belong in environment variables or TOML config files.
 
-Complex algorithms should include design comments explaining *why* they exist, not merely *what* they do.
+Key variables:
 
-Architectural decisions belong in `docs/`, not in source code comments.
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `DATABASE_URL` | — | PostgreSQL connection string |
+| `REDIS_URL` | `redis://localhost:6379` | Redis for job queue and cache |
+| `QDRANT_URL` | `http://localhost:6333` | Qdrant vector store endpoint |
+| `CONTEXTRA_ENV` | `development` | Environment name |
+| `WORKER_CONCURRENCY` | `4` | Worker task concurrency |
+| `WORKER_SWEEP_INTERVAL_SECS` | `900` | Memory sweep interval |
+| `CONTEXTRA_GATEWAY_URL` | `http://127.0.0.1:3000` | CLI default Gateway URL |
+| `CONTEXTRA_AUTH_TOKEN` | — | CLI Bearer token |
+
+---
+
+# Logging & Observability
+
+Use structured logging. Every significant operation emits:
+
+- Request ID / Trace ID
+- Duration
+- Status / error code
+
+Worker jobs also emit:
+- `worker_job_duration_seconds` (histogram by job type and status)
+- `worker_jobs_total` (counter by job type and status)
+- `worker_jobs_retried_total` (counter by job type)
 
 ---
 
 # Commits
 
-Commits should represent a single logical change.
-
-Preferred format:
-
 ```text
 feat(context): implement context assembler
-
 fix(storage): rollback failed transactions
-
 refactor(retrieval): simplify reranking pipeline
-
 docs(api): update authentication section
 ```
-
-Avoid unrelated changes in the same commit.
 
 ---
 
 # Pull Requests
 
-Every pull request should:
-
-- Compile successfully
-- Pass tests
-- Follow formatting rules
-- Include documentation updates when necessary
-
-Architectural changes should also include an ADR (Architecture Decision Record).
-
----
-
-# Performance
-
-Performance is considered a feature.
-
-When introducing changes:
-
-- Avoid unnecessary allocations
-- Minimize cloning
-- Prefer borrowing
-- Benchmark critical paths
-- Measure before optimizing
-
-Premature optimization should be avoided, but unnecessary inefficiencies should not be introduced.
-
----
-
-# Observability
-
-Every major workflow should emit:
-
-- Traces
-- Metrics
-- Structured logs
-
-If a production issue cannot be diagnosed through telemetry, observability is considered incomplete.
-
----
-
-# Security
-
-Never:
-
-- Commit secrets
-- Log credentials
-- Disable TLS verification
-- Trust unvalidated input
-
-Security is the default, not an optional feature.
-
----
-
-# Architectural Principles
-
-Every contribution should reinforce the following principles.
-
-- Separation of concerns
-- Strong typing
-- Provider independence
-- Storage abstraction
-- Modular design
-- Dependency inversion
-- Observability
-- Testability
-
-When in doubt, choose the design that keeps libraries independent and responsibilities clear.
-
----
-
-# Summary
-
-Contextra is intended to be a long-lived platform.
-
-Consistency is more valuable than cleverness.
-
-A small, well-structured implementation is preferred over a larger, more complex one.
-
-Every contribution should improve the maintainability, clarity, and reliability of the platform.
+Every PR must:
+- Compile: `cargo build`
+- Pass tests: `cargo test`
+- Pass lint: `cargo clippy -- -D warnings`
+- Be formatted: `cargo fmt --check`
+- Include documentation updates where relevant

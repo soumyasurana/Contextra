@@ -24,6 +24,9 @@ members = [
     "libs/ingestion",
     "libs/orchestration",
     "libs/evaluation",
+
+    # End-to-end Tests
+    "tests/e2e",
 ]
 
 [workspace.package]

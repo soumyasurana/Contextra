@@ -1,4 +1,4 @@
-#![allow(clippy::unwrap_used)]
+#![allow(clippy::unwrap_used, clippy::expect_used)]
 
 use std::sync::Arc;
 use std::time::Duration;
@@ -55,7 +55,10 @@ fn invalid_evaluation_job() -> Job {
 }
 
 fn sweep_job() -> Job {
-    Job::new(JobKind::MemorySweep, serde_json::json!({ "scope": "global" }))
+    Job::new(
+        JobKind::MemorySweep,
+        serde_json::json!({ "scope": "global" }),
+    )
 }
 
 // ---------------------------------------------------------------------------

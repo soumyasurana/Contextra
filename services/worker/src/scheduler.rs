@@ -1,7 +1,7 @@
 use std::sync::Arc;
 use std::time::Duration;
-use tokio::time::MissedTickBehavior;
 use tokio::sync::watch;
+use tokio::time::MissedTickBehavior;
 use tracing::{error, info};
 
 use crate::job::{Job, JobKind};

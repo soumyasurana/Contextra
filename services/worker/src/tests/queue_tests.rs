@@ -1,4 +1,4 @@
-#![allow(clippy::unwrap_used)]
+#![allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
 
 use std::time::Duration;
 
@@ -21,7 +21,10 @@ fn ingestion_job() -> Job {
 }
 
 fn sweep_job() -> Job {
-    Job::new(JobKind::MemorySweep, serde_json::json!({ "scope": "global" }))
+    Job::new(
+        JobKind::MemorySweep,
+        serde_json::json!({ "scope": "global" }),
+    )
 }
 
 // ---------------------------------------------------------------------------
@@ -37,11 +40,10 @@ async fn test_enqueue_dequeue_roundtrip() {
     queue.enqueue(&job).await.unwrap();
     assert_eq!(queue.ready_len().await, 1);
 
-    let dequeued = queue
-        .dequeue(Duration::from_millis(100))
-        .await
-        .unwrap()
-        .expect("should have dequeued a job");
+    let dequeued = match queue.dequeue(Duration::from_millis(100)).await.unwrap() {
+        Some(job) => job,
+        None => panic!("should have dequeued a job"),
+    };
 
     assert_eq!(dequeued.id, job_id);
     assert_eq!(dequeued.kind, JobKind::DocumentIngestion);
@@ -190,11 +192,10 @@ async fn test_nack_sequential_retries_increment_correctly() {
             }
         }
 
-        let dequeued = queue
-            .dequeue(Duration::from_millis(100))
-            .await
-            .unwrap()
-            .expect("job should be available");
+        let dequeued = match queue.dequeue(Duration::from_millis(100)).await.unwrap() {
+            Some(job) => job,
+            None => panic!("job should be available"),
+        };
         assert_eq!(dequeued.retry_count, expected_retry, "retry_count mismatch");
 
         queue.nack(&dequeued).await.unwrap();

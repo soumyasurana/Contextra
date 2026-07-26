@@ -98,7 +98,9 @@ impl RedisJobQueue {
         let dequeue_conn = client
             .get_multiplexed_async_connection()
             .await
-            .map_err(|e| WorkerError::Queue(format!("failed to connect to Redis (dequeue): {e}")))?;
+            .map_err(|e| {
+                WorkerError::Queue(format!("failed to connect to Redis (dequeue): {e}"))
+            })?;
 
         let cmd_conn = client
             .get_multiplexed_async_connection()
@@ -263,8 +265,7 @@ impl JobQueue for InMemoryJobQueue {
 
     async fn dequeue(&self, timeout: Duration) -> Result<Option<Job>, WorkerError> {
         // Poll with 10ms intervals up to `timeout` to simulate blocking behaviour.
-        let deadline =
-            std::time::Instant::now() + timeout.min(Duration::from_millis(500));
+        let deadline = std::time::Instant::now() + timeout.min(Duration::from_millis(500));
 
         loop {
             let now = std::time::Instant::now();
@@ -277,7 +278,8 @@ impl JobQueue for InMemoryJobQueue {
                         .unwrap_or_default()
                         .as_secs();
                     job.scheduled_at <= now_secs
-                }) && let Some(job) = ready.remove(pos) {
+                }) && let Some(job) = ready.remove(pos)
+                {
                     self.processing.lock().await.push(job.clone());
                     return Ok(Some(job));
                 }

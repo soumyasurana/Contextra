@@ -2,7 +2,7 @@
 
 ## A Production-Grade Context Engineering Platform for AI Applications
 
-Build intelligent AI applications by managing the complete lifecycle of context—from document ingestion and semantic retrieval to memory, orchestration, and provider execution.
+Build intelligent AI applications by managing the complete lifecycle of context — from document ingestion and semantic retrieval to memory, orchestration, and provider execution.
 
 ![Rust](https://img.shields.io/badge/Rust-2024-orange?logo=rust)
 ![License](https://img.shields.io/badge/License-MIT-blue)
@@ -13,27 +13,19 @@ Build intelligent AI applications by managing the complete lifecycle of context�
 
 ---
 
-# Overview
+## Overview
 
 Contextra is a production-grade AI context engineering platform built in Rust.
 
 Unlike traditional Retrieval-Augmented Generation (RAG) frameworks that focus primarily on retrieval, Contextra treats **context** as a first-class engineering problem. It provides reusable infrastructure for constructing, optimizing, and managing context throughout the entire lifecycle of an AI application.
 
-The platform is designed as a modular Rust workspace that can evolve into independently deployable microservices while maintaining reusable business logic through shared libraries.
+The platform is designed as a modular Rust workspace of independently deployable microservices sharing business logic through well-defined domain libraries.
 
 ---
 
-# Why Contextra?
+## Why Contextra?
 
-Most AI frameworks solve isolated problems.
-
-Examples include:
-
-- Retrieval
-- Vector databases
-- Prompt templating
-- Agent execution
-- Workflow automation
+Most AI frameworks solve isolated problems — retrieval, vector databases, prompt templating, or agent execution in isolation.
 
 Contextra focuses on **the complete context lifecycle**.
 
@@ -45,250 +37,232 @@ Contextra asks:
 
 > "What is the best possible context for this model given everything the system knows?"
 
-Retrieval therefore becomes only one component of a much larger Context Engineering Platform.
+Retrieval becomes only one component of a much larger Context Engineering Platform.
 
 ---
 
-# Getting Started
+## Quick Start
 
-> **Note**
->
-> Contextra is under active development. The project architecture and workspace are stable while the core libraries are being implemented.
+### Prerequisites
 
-## Prerequisites
+- Rust ≥ 1.90
+- Docker & Docker Compose ≥ 2.20
 
-- Rust 1.90+
-- Cargo
-
-## Clone
+### Clone
 
 ```bash
 git clone https://github.com/soumyasurana/Contextra.git
 cd Contextra
-````
+```
 
-## Build
+### Start Infrastructure
+
+```bash
+docker compose -f deployments/docker/docker-compose.yml up -d postgres redis qdrant
+```
+
+### Build
 
 ```bash
 cargo build
 ```
 
-## Run tests
+### Run Tests
 
 ```bash
 cargo test
 ```
 
----
+### Start the Gateway
 
-# Core Capabilities
-
-### Context Engine
-
-* Context assembly
-* Context optimization
-* Context ranking
-* Prompt optimization
-
-### Retrieval
-
-* Semantic retrieval
-* Hybrid retrieval
-* Metadata filtering
-* Result reranking
-
-### Memory
-
-* Short-term memory
-* Long-term memory
-* Episodic memory
-* Semantic memory
-
-### Provider Abstraction
-
-Planned providers include:
-
-* OpenAI
-* Anthropic
-* Google Gemini
-* Ollama
-* Voyage AI
-
-### Storage
-
-* PostgreSQL
-* Redis
-* Qdrant
-* Blob Storage
-
-### Observability
-
-* Structured logging
-* OpenTelemetry
-* Metrics
-* Distributed tracing
-
----
-
-# Target Architecture
-
-```text
-                   Client Applications
-                           │
-                           ▼
-                    Gateway Service
-                           │
-                           ▼
-                    Orchestration
-                           │
-           ┌───────────────┼───────────────┐
-           ▼               ▼               ▼
-       Context         Retrieval       Memory
-           │               │               │
-           └───────┬───────┴───────┬───────┘
-                   ▼               ▼
-              Embeddings      Providers
-                       │
-                       ▼
-                    Storage
+```bash
+DATABASE_URL=postgres://postgres:postgrespassword@localhost:5432/contextra \
+REDIS_URL=redis://localhost:6379 \
+QDRANT_URL=http://localhost:6333 \
+cargo run -p gateway
 ```
 
-Business logic resides inside reusable libraries.
-
-Services remain lightweight wrappers around those libraries.
+API docs available at: http://127.0.0.1:3000/docs
 
 ---
 
-# Workspace Structure
+## CLI (`contextra`)
 
-```text
-contextra/
+Install the CLI:
 
-services/
-libs/
-proto/
-sdk/
-configs/
-deployments/
-docs/
-tests/
+```bash
+cargo install --path services/cli
+```
+
+### Ingest a Document
+
+```bash
+# Via Gateway REST API
+contextra ingest ./docs/architecture.md
+
+# Offline/local mode (no network required)
+contextra --local ingest ./docs/architecture.md
+```
+
+### Chat
+
+```bash
+# Single message
+contextra chat "Explain Contextra's retrieval pipeline"
+
+# Interactive REPL
+contextra chat
+
+# Offline mode
+contextra --local chat "What is context engineering?"
+```
+
+### List Collections
+
+```bash
+contextra collections list
+```
+
+### Run Evaluation
+
+```bash
+# Built-in benchmark dataset
+contextra --local eval run
+
+# Custom dataset
+contextra --local eval run --dataset ./tests/fixtures/benchmark.json --k 5
+```
+
+### Global Options
+
+```
+--gateway-url <URL>     Gateway REST API endpoint [env: CONTEXTRA_GATEWAY_URL] [default: http://127.0.0.1:3000]
+--auth-token <TOKEN>    Bearer auth token         [env: CONTEXTRA_AUTH_TOKEN]
+--local                 Run in offline/local mode [env: CONTEXTRA_LOCAL]
+```
+
+---
+
+## Architecture
+
+```
+┌──────────────────────────────────────────────────────────────┐
+│                         Services                             │
+│   ┌──────────┐   ┌──────────┐   ┌──────────────────────┐    │
+│   │ Gateway  │   │  Worker  │   │    CLI (contextra)    │    │
+│   │ (HTTP)   │   │ (Queue)  │   │ (REST + Local modes)  │    │
+│   └────┬─────┘   └────┬─────┘   └──────────┬───────────┘    │
+└────────┼──────────────┼────────────────────┼────────────────┘
+         │              │                    │
+┌────────▼──────────────▼────────────────────▼────────────────┐
+│                      Domain Libraries                         │
+│                                                               │
+│  orchestration → context → memory + retrieval                 │
+│                          → embeddings → providers             │
+│                          → ingestion                          │
+│                          → evaluation                         │
+│                          → prompts                            │
+│                          → storage (Postgres/Redis/Qdrant)    │
+└──────────────────────────────────────────────────────────────┘
 ```
 
 ### Services
 
-Deployable applications.
-
-* Gateway
-* Worker
-* CLI
+| Service | Description |
+|---------|-------------|
+| `services/gateway` | REST API server (Axum) — documents, collections, conversations, chat |
+| `services/worker` | Background job processor — ingestion, evaluation, memory sweeps |
+| `services/cli` | Command-line client with REST and local/offline execution modes |
 
 ### Libraries
 
-Reusable business logic.
-
-* Context
-* Retrieval
-* Memory
-* Providers
-* Embeddings
-* Storage
-* Orchestration
-
----
-
-# Technology Stack
-
-| Component       | Technology             |
-| --------------- | ---------------------- |
-| Language        | Rust                   |
-| Async Runtime   | Tokio                  |
-| HTTP            | Axum                   |
-| Configuration   | config-rs, dotenvy     |
-| Database        | PostgreSQL             |
-| Cache           | Redis                  |
-| Vector Database | Qdrant                 |
-| Serialization   | Serde                  |
-| Observability   | tracing, OpenTelemetry |
+| Library | Description |
+|---------|-------------|
+| `libs/types` | Shared domain types (`DocumentId`, `CollectionId`, `Chunk`, etc.) |
+| `libs/errors` | Unified `ContextraError` type |
+| `libs/common` | Shared utilities — pagination, cursors |
+| `libs/settings` | Config loading via `config-rs` (TOML + env) |
+| `libs/auth` | Authentication context and JWT verification |
+| `libs/storage` | `RedisCache`, `PostgresStore`, `QdrantVectorStore`, `InMemoryVectorStore` |
+| `libs/providers` | OpenAI / Anthropic / Gemini LLM provider abstraction |
+| `libs/embeddings` | OpenAI and Ollama embedding providers with caching |
+| `libs/ingestion` | Document parsing, chunking, embedding, and vector upsert pipeline |
+| `libs/retrieval` | Semantic, hybrid, and metadata-filtered retrieval with reranking |
+| `libs/memory` | Conversation memory, importance scoring, rolling summarization |
+| `libs/context` | Context assembly and token-budget optimization |
+| `libs/prompts` | Prompt template registry with Handlebars and versioning |
+| `libs/orchestration` | Chat request orchestration pipeline |
+| `libs/evaluation` | Retrieval and generation quality benchmarking |
+| `libs/telemetry` | Structured logging, metrics, and OpenTelemetry tracing |
 
 ---
 
-# Roadmap
+## Infrastructure
 
-### Phase 1 — Foundation
+### Docker Compose (local dev)
 
-* Workspace
-* Documentation
-* Configuration
-* Telemetry
+```bash
+# Start all services
+docker compose -f deployments/docker/docker-compose.yml up --build
 
-### Phase 2 — Storage
+# Infrastructure only (for local `cargo run`)
+docker compose -f deployments/docker/docker-compose.yml up -d postgres redis qdrant
 
-* PostgreSQL
-* Redis
-* Blob Storage
-* Qdrant
+# Teardown
+docker compose -f deployments/docker/docker-compose.yml down
 
-### Phase 3 — AI Infrastructure
+# Teardown + delete volumes
+docker compose -f deployments/docker/docker-compose.yml down -v
+```
 
-* Provider abstraction
-* Embeddings
-* Retrieval
-* Memory
-
-### Phase 4 — Context Engine
-
-* Context optimization
-* Prompt orchestration
-* Workflow execution
-
-### Phase 5 — Platform
-
-* Gateway
-* SDKs
-* Microservice deployment
+| Service | Port |
+|---------|------|
+| PostgreSQL | 5432 |
+| Redis | 6379 |
+| Qdrant | 6333 / 6334 |
+| Gateway | 3000 |
 
 ---
 
-# Design Decisions
+## Testing
 
-Some of the architectural principles behind Contextra.
+```bash
+# All workspace tests
+cargo test
 
-* **Why Rust?** Memory safety, predictable performance, and fearless concurrency.
-* **Why Context Engineering?** Context quality has a greater impact on model performance than model selection alone.
-* **Why Modular Libraries?** Shared business logic can be reused across multiple services and SDKs.
-* **Why Provider Abstraction?** Applications should remain independent of any single LLM provider.
+# Specific package
+cargo test -p worker
+cargo test -p gateway
+cargo test -p cli
 
----
+# End-to-end tests (in-process Gateway + CLI roundtrip)
+cargo test -p e2e-tests
 
-# Documentation
+# Lint
+cargo clippy -- -D warnings
 
-Detailed documentation is available in the `docs/` directory.
-
-* Architecture
-* Workspace
-* Libraries
-* Services
-* Context Engine
-* Retrieval
-* Memory
-* Storage
-* Providers
-* API
-* Development Guide
+# Format check
+cargo fmt --check
+```
 
 ---
 
-# Contributing
+## Documentation
 
-Contributions, suggestions, and discussions are welcome.
-
-Before contributing, please read:
-
-* `docs/development.md`
-* `docs/architecture.md`
+| Document | Description |
+|----------|-------------|
+| [docs/development.md](docs/development.md) | Local setup, Docker Compose, CLI usage, testing |
+| [docs/architecture.md](docs/architecture.md) | System architecture and design principles |
+| [docs/api.md](docs/api.md) | REST API reference |
+| [docs/libraries.md](docs/libraries.md) | Library catalog and responsibilities |
+| [docs/retrieval.md](docs/retrieval.md) | Retrieval pipeline design |
+| [docs/memory.md](docs/memory.md) | Memory and summarization system |
+| [docs/orchestration.md](docs/orchestration.md) | Orchestration pipeline |
+| [docs/providers.md](docs/providers.md) | LLM and embedding provider guide |
+| [docs/storage.md](docs/storage.md) | Storage backends |
 
 ---
 
-# License
+## License
 
-This project is licensed under the MIT License. See the [LICENSE](LICENSE) file for details.
+MIT — see [LICENSE](LICENSE)

@@ -3,10 +3,10 @@ use std::time::Duration;
 use tokio::sync::watch;
 use tracing::info;
 
+use worker::handlers::Dispatcher;
 use worker::handlers::evaluation::EvaluationJobHandler;
 use worker::handlers::ingestion::IngestionJobHandler;
 use worker::handlers::memory_sweep::MemorySweepJobHandler;
-use worker::handlers::Dispatcher;
 use worker::queue::RedisJobQueue;
 use worker::scheduler::Scheduler;
 use worker::worker::WorkerPool;
@@ -22,8 +22,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     // -----------------------------------------------------------------------
     // Telemetry
     // -----------------------------------------------------------------------
-    let log_level =
-        std::env::var("WORKER_LOG_LEVEL").unwrap_or_else(|_| "info".into());
+    let log_level = std::env::var("WORKER_LOG_LEVEL").unwrap_or_else(|_| "info".into());
     let telemetry_settings = telemetry::TelemetrySettings {
         service_name: "contextra-worker".into(),
         log_level,
@@ -34,8 +33,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     // -----------------------------------------------------------------------
     // Configuration from environment
     // -----------------------------------------------------------------------
-    let redis_url =
-        std::env::var("REDIS_URL").unwrap_or_else(|_| "redis://localhost:6379".into());
+    let redis_url = std::env::var("REDIS_URL").unwrap_or_else(|_| "redis://localhost:6379".into());
 
     let concurrency = std::env::var("WORKER_CONCURRENCY")
         .ok()
@@ -49,9 +47,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     info!(
         concurrency,
-        sweep_interval_secs,
-        redis_url,
-        "starting contextra worker"
+        sweep_interval_secs, redis_url, "starting contextra worker"
     );
 
     // -----------------------------------------------------------------------
@@ -85,10 +81,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     // -----------------------------------------------------------------------
     // Spawn scheduler
     // -----------------------------------------------------------------------
-    let scheduler = Scheduler::new(
-        Arc::clone(&queue),
-        Duration::from_secs(sweep_interval_secs),
-    );
+    let scheduler = Scheduler::new(Arc::clone(&queue), Duration::from_secs(sweep_interval_secs));
     let sched_rx = shutdown_rx.clone();
     let sched_handle = tokio::spawn(async move {
         scheduler.run(sched_rx).await;

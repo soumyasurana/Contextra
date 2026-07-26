@@ -41,11 +41,7 @@ impl JobHandler for EvaluationJobHandler {
             .get("judge_model")
             .and_then(|v| v.as_str())
             .unwrap_or("gpt-4.1-mini");
-        let k = job
-            .payload
-            .get("k")
-            .and_then(|v| v.as_u64())
-            .unwrap_or(5);
+        let k = job.payload.get("k").and_then(|v| v.as_u64()).unwrap_or(5);
 
         info!(
             job_id = %job.id,
