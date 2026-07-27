@@ -105,14 +105,19 @@ jobs:
           script: |
             set -e
 
-            cd ~/Contextra/deployments/docker
+            cd ~/Contextra
 
-            docker login ghcr.io \
-              -u "${{ secrets.GHCR_USERNAME }}" \
-              -p "${{ secrets.GHCR_TOKEN }}"
+            git fetch origin
+            git reset --hard origin/main
+
+            cd deployments/docker
+
+            echo "${{ secrets.GHCR_TOKEN }}" | docker login ghcr.io \
+                -u "${{ secrets.GHCR_USERNAME }}" \
+                --password-stdin
 
             docker compose pull
 
-            docker compose up -d
+            docker compose up -d --remove-orphans
 
-            docker image prune -af
+            docker image prune -f
