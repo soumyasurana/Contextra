@@ -40,11 +40,6 @@ services:
       - "6334:6334"
     volumes:
       - qdrant_data:/qdrant/storage
-    healthcheck:
-      test: ["CMD", "wget", "--spider", "-q", "http://localhost:6333/healthz"]
-      interval: 5s
-      timeout: 5s
-      retries: 5
 
   gateway:
     image: ghcr.io/soumyasurana/contextra-gateway:latest
@@ -65,7 +60,7 @@ services:
       redis:
         condition: service_healthy
       qdrant:
-        condition: service_healthy
+        condition: service_started
 
   worker:
     image: ghcr.io/soumyasurana/contextra-worker:latest
@@ -83,7 +78,7 @@ services:
       redis:
         condition: service_healthy
       qdrant:
-        condition: service_healthy
+        condition: service_started
 
   web:
     image: ghcr.io/soumyasurana/contextra-web:latest
