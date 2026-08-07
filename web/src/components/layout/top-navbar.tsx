@@ -1,16 +1,13 @@
 'use client';
 
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import {
   Search,
   Bell,
-  User,
-  Command,
   CheckCircle2,
-  ExternalLink,
-  ShieldAlert,
   Sparkles,
-  GitBranch,
+  Server,
+  AlertTriangle,
 } from 'lucide-react';
 import { useAppStore } from '@/lib/store';
 
@@ -23,10 +20,15 @@ function GithubIcon(props: React.SVGProps<SVGSVGElement>) {
   );
 }
 
-
 export function TopNavbar() {
-  const { setCommandPaletteOpen, settings } = useAppStore();
+  const { setCommandPaletteOpen, settings, apiConnected, checkApiHealth } = useAppStore();
   const [notificationsOpen, setNotificationsOpen] = useState(false);
+
+  useEffect(() => {
+    checkApiHealth();
+    const interval = setInterval(checkApiHealth, 15000);
+    return () => clearInterval(interval);
+  }, [checkApiHealth]);
 
   const notifications = [
     { id: 1, title: 'Eval Suite Passed', time: '10m ago', unread: true },
@@ -50,6 +52,19 @@ export function TopNavbar() {
 
       {/* Right Navbar Controls */}
       <div className="flex items-center space-x-4">
+        {/* Gateway Connection Status Badge */}
+        <div
+          className={`flex items-center space-x-1.5 px-3 py-1 rounded-full text-xs font-semibold border ${
+            apiConnected
+              ? 'bg-emerald-500/10 text-emerald-400 border-emerald-500/20'
+              : 'bg-amber-500/10 text-amber-400 border-amber-500/20'
+          }`}
+          title={apiConnected ? 'Rust Gateway Connected' : 'Rust Gateway Disconnected'}
+        >
+          <Server className="w-3.5 h-3.5" />
+          <span>{apiConnected ? 'API Connected' : 'API Offline'}</span>
+        </div>
+
         {/* Active Provider Badge */}
         <div className="hidden md:flex items-center space-x-2 px-3 py-1 rounded-full bg-indigo-500/10 border border-indigo-500/20 text-xs font-medium text-indigo-300">
           <Sparkles className="w-3.5 h-3.5 text-indigo-400" />

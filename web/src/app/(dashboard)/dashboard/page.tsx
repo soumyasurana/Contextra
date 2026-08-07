@@ -1,6 +1,6 @@
 'use client';
 
-import React from 'react';
+import React, { useEffect, useState } from 'react';
 import { motion } from 'framer-motion';
 import {
   FileText,
@@ -11,13 +11,13 @@ import {
   Cpu,
   Activity,
   Clock,
-  ArrowUpRight,
   TrendingUp,
   Server,
-  Database,
   Zap,
   CheckCircle2,
-  Sparkles,
+  XCircle,
+  RefreshCw,
+  AlertTriangle,
 } from 'lucide-react';
 import {
   AreaChart,
@@ -33,25 +33,46 @@ import {
   Pie,
   Cell,
 } from 'recharts';
-import {
-  MOCK_METRICS,
-  MOCK_REQUESTS_OVER_TIME,
-  MOCK_PROVIDER_USAGE,
-  MOCK_LATENCY_BREAKDOWN,
-  MOCK_ACTIVITIES,
-  MOCK_SYSTEM_STATUS,
-} from '@/lib/mock-data';
+import { useAppStore } from '@/lib/store';
 
 export default function DashboardPage() {
+  const {
+    documentsCount,
+    collectionsCount,
+    conversationsCount,
+    documents,
+    collections,
+    conversations,
+    prompts,
+    apiConnected,
+    fetchDashboardData,
+  } = useAppStore();
+
+  const [isLoading, setIsLoading] = useState(true);
+
+  useEffect(() => {
+    let isMounted = true;
+    fetchDashboardData().finally(() => {
+      if (isMounted) setIsLoading(false);
+    });
+    return () => {
+      isMounted = false;
+    };
+  }, [fetchDashboardData]);
+
+  // Compute stats from real backend data
+  const totalChunks = documents.reduce((acc, d) => acc + (d.chunks_count || 0), 0);
+  const totalEmbeddings = totalChunks; // 1-to-1 vector embedding per chunk
+
   const metricCards = [
-    { label: 'Total Documents', value: MOCK_METRICS.total_documents, icon: FileText, change: '+12%', color: 'from-blue-500 to-indigo-600' },
-    { label: 'Ingested Chunks', value: MOCK_METRICS.total_chunks.toLocaleString(), icon: Layers, change: '+8.4%', color: 'from-indigo-500 to-purple-600' },
-    { label: 'Collections', value: MOCK_METRICS.total_collections, icon: FolderArchive, change: 'Stable', color: 'from-purple-500 to-pink-600' },
-    { label: 'Conversations', value: MOCK_METRICS.total_conversations.toLocaleString(), icon: MessageSquare, change: '+24%', color: 'from-emerald-500 to-teal-600' },
-    { label: 'Prompt Templates', value: MOCK_METRICS.total_prompts, icon: Code2, change: '+2 new', color: 'from-amber-500 to-orange-600' },
-    { label: 'Vector Embeddings', value: MOCK_METRICS.total_embeddings.toLocaleString(), icon: Cpu, change: '+18.4k', color: 'from-cyan-500 to-blue-600' },
-    { label: 'Total Requests', value: MOCK_METRICS.total_requests.toLocaleString(), icon: Activity, change: '+32.1%', color: 'from-pink-500 to-rose-600' },
-    { label: 'Avg Latency', value: `${MOCK_METRICS.avg_latency_ms} ms`, icon: Clock, change: '-14ms', color: 'from-emerald-400 to-green-600' },
+    { label: 'Total Documents', value: documentsCount.toLocaleString(), icon: FileText, change: 'Live', color: 'from-blue-500 to-indigo-600' },
+    { label: 'Ingested Chunks', value: totalChunks.toLocaleString(), icon: Layers, change: 'Live', color: 'from-indigo-500 to-purple-600' },
+    { label: 'Collections', value: collectionsCount.toLocaleString(), icon: FolderArchive, change: 'Live', color: 'from-purple-500 to-pink-600' },
+    { label: 'Conversations', value: conversationsCount.toLocaleString(), icon: MessageSquare, change: 'Live', color: 'from-emerald-500 to-teal-600' },
+    { label: 'Prompt Templates', value: prompts.length.toLocaleString(), icon: Code2, change: 'Local', color: 'from-amber-500 to-orange-600' },
+    { label: 'Vector Embeddings', value: totalEmbeddings.toLocaleString(), icon: Cpu, change: 'Live', color: 'from-cyan-500 to-blue-600' },
+    { label: 'Total Requests', value: '0', icon: Activity, change: 'Telemetry off', color: 'from-pink-500 to-rose-600' },
+    { label: 'Avg Latency', value: '—', icon: Clock, change: 'Telemetry off', color: 'from-emerald-400 to-green-600' },
   ];
 
   return (
@@ -61,9 +82,19 @@ export default function DashboardPage() {
         <div>
           <h1 className="text-2xl font-bold tracking-tight text-white flex items-center space-x-3">
             <span>Platform Overview</span>
-            <span className="px-2.5 py-0.5 text-xs font-semibold bg-emerald-500/10 text-emerald-400 border border-emerald-500/20 rounded-full flex items-center space-x-1">
-              <span className="w-2 h-2 rounded-full bg-emerald-400 animate-pulse" />
-              <span>Rust Engine Active</span>
+            <span
+              className={`px-2.5 py-0.5 text-xs font-semibold border rounded-full flex items-center space-x-1.5 ${
+                apiConnected
+                  ? 'bg-emerald-500/10 text-emerald-400 border-emerald-500/20'
+                  : 'bg-rose-500/10 text-rose-400 border-rose-500/20'
+              }`}
+            >
+              <span
+                className={`w-2 h-2 rounded-full ${
+                  apiConnected ? 'bg-emerald-400 animate-pulse' : 'bg-rose-400'
+                }`}
+              />
+              <span>{apiConnected ? 'Backend Connected' : 'Backend Disconnected'}</span>
             </span>
           </h1>
           <p className="text-sm text-zinc-400 mt-1">
@@ -72,12 +103,35 @@ export default function DashboardPage() {
         </div>
 
         <div className="flex items-center space-x-3">
+          <button
+            onClick={() => {
+              setIsLoading(true);
+              fetchDashboardData().finally(() => setIsLoading(false));
+            }}
+            className="px-3 py-1.5 rounded-xl glass-card text-xs text-zinc-300 hover:text-white flex items-center space-x-2 transition-colors"
+          >
+            <RefreshCw className={`w-3.5 h-3.5 ${isLoading ? 'animate-spin' : ''}`} />
+            <span>Refresh</span>
+          </button>
           <div className="px-3 py-1.5 rounded-xl glass-card text-xs text-zinc-300 flex items-center space-x-2">
             <Zap className="w-3.5 h-3.5 text-amber-400" />
-            <span>Qdrant HNSW: <strong className="text-white font-mono">18,450 vectors</strong></span>
+            <span>Qdrant Vectors: <strong className="text-white font-mono">{totalEmbeddings.toLocaleString()}</strong></span>
           </div>
         </div>
       </div>
+
+      {/* Connection Warning Banner if backend is not reachable */}
+      {!apiConnected && !isLoading && (
+        <div className="p-4 rounded-2xl bg-rose-500/10 border border-rose-500/20 flex items-center space-x-3 text-xs text-rose-300">
+          <AlertTriangle className="w-5 h-5 text-rose-400 shrink-0" />
+          <div>
+            <p className="font-semibold">Unable to connect to Contextra Backend Gateway (http://localhost:3000)</p>
+            <p className="text-rose-400/80 mt-0.5">
+              Make sure the Rust gateway service is running. Data below represents local state or 0 values until connected.
+            </p>
+          </div>
+        </div>
+      )}
 
       {/* Metrics Grid */}
       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
@@ -99,9 +153,10 @@ export default function DashboardPage() {
               </div>
 
               <div className="mt-3 flex items-baseline justify-between">
-                <span className="text-2xl font-bold tracking-tight text-white font-mono">{card.value}</span>
-                <span className="text-xs font-semibold text-emerald-400 flex items-center space-x-0.5">
-                  <TrendingUp className="w-3 h-3" />
+                <span className="text-2xl font-bold tracking-tight text-white font-mono">
+                  {isLoading ? '...' : card.value}
+                </span>
+                <span className="text-xs font-semibold text-zinc-500 flex items-center space-x-0.5">
                   <span>{card.change}</span>
                 </span>
               </div>
@@ -112,113 +167,53 @@ export default function DashboardPage() {
 
       {/* Main Charts Section */}
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-        {/* Requests & Latency Area Chart (Spans 2 columns) */}
+        {/* Requests & Latency Area Chart */}
         <div className="lg:col-span-2 glass-panel rounded-2xl p-6 space-y-4">
           <div className="flex items-center justify-between">
             <div>
               <h2 className="text-base font-semibold text-white">Requests & Latency Over Time</h2>
               <p className="text-xs text-zinc-400">24-hour API request volume and average response time (ms)</p>
             </div>
-            <div className="flex items-center space-x-4 text-xs">
-              <div className="flex items-center space-x-1.5">
-                <div className="w-2.5 h-2.5 rounded-full bg-indigo-500" />
-                <span className="text-zinc-400">Requests</span>
-              </div>
-              <div className="flex items-center space-x-1.5">
-                <div className="w-2.5 h-2.5 rounded-full bg-emerald-400" />
-                <span className="text-zinc-400">Latency (ms)</span>
-              </div>
-            </div>
           </div>
 
-          <div className="h-72 w-full pt-4">
-            <ResponsiveContainer width="100%" height="100%">
-              <AreaChart data={MOCK_REQUESTS_OVER_TIME} margin={{ top: 10, right: 10, left: -20, bottom: 0 }}>
-                <defs>
-                  <linearGradient id="colorRequests" x1="0" y1="0" x2="0" y2="1">
-                    <stop offset="5%" stopColor="#6366f1" stopOpacity={0.4} />
-                    <stop offset="95%" stopColor="#6366f1" stopOpacity={0.0} />
-                  </linearGradient>
-                  <linearGradient id="colorLatency" x1="0" y1="0" x2="0" y2="1">
-                    <stop offset="5%" stopColor="#10b981" stopOpacity={0.3} />
-                    <stop offset="95%" stopColor="#10b981" stopOpacity={0.0} />
-                  </linearGradient>
-                </defs>
-                <CartesianGrid strokeDasharray="3 3" stroke="#27272a" vertical={false} />
-                <XAxis dataKey="time" stroke="#71717a" fontSize={11} tickLine={false} />
-                <YAxis stroke="#71717a" fontSize={11} tickLine={false} />
-                <Tooltip
-                  contentStyle={{ backgroundColor: '#12141d', border: '1px solid rgba(255,255,255,0.1)', borderRadius: '12px' }}
-                  labelStyle={{ color: '#f4f4f5', fontWeight: 600, fontSize: '12px' }}
-                />
-                <Area type="monotone" dataKey="requests" stroke="#6366f1" strokeWidth={2} fillOpacity={1} fill="url(#colorRequests)" />
-                <Area type="monotone" dataKey="latency" stroke="#10b981" strokeWidth={2} fillOpacity={1} fill="url(#colorLatency)" />
-              </AreaChart>
-            </ResponsiveContainer>
+          <div className="h-72 w-full pt-4 flex flex-col items-center justify-center border border-white/5 rounded-xl bg-zinc-950/40 text-center">
+            <Activity className="w-8 h-8 text-zinc-600 mb-2" />
+            <p className="text-xs font-medium text-zinc-400">No request telemetry data recorded yet</p>
+            <p className="text-[11px] text-zinc-600 mt-1 max-w-xs">
+              Execute queries in the RAG playground to generate real-time request metrics.
+            </p>
           </div>
         </div>
 
-        {/* Provider Usage Distribution Pie Chart */}
+        {/* Provider Usage Distribution */}
         <div className="glass-panel rounded-2xl p-6 space-y-4 flex flex-col justify-between">
           <div>
             <h2 className="text-base font-semibold text-white">LLM Provider Usage</h2>
             <p className="text-xs text-zinc-400">Distribution of chat completions across model providers</p>
           </div>
 
-          <div className="h-52 w-full flex items-center justify-center">
-            <ResponsiveContainer width="100%" height="100%">
-              <PieChart>
-                <Pie data={MOCK_PROVIDER_USAGE} cx="50%" cy="50%" innerRadius={55} outerRadius={80} paddingAngle={4} dataKey="value">
-                  {MOCK_PROVIDER_USAGE.map((entry, index) => (
-                    <Cell key={`cell-${index}`} fill={entry.color} stroke="#090a0f" strokeWidth={2} />
-                  ))}
-                </Pie>
-                <Tooltip
-                  contentStyle={{ backgroundColor: '#12141d', border: '1px solid rgba(255,255,255,0.1)', borderRadius: '12px' }}
-                  itemStyle={{ color: '#f4f4f5', fontSize: '12px' }}
-                />
-              </PieChart>
-            </ResponsiveContainer>
-          </div>
-
-          <div className="grid grid-cols-2 gap-2 pt-2 border-t border-white/5 text-xs">
-            {MOCK_PROVIDER_USAGE.map((p) => (
-              <div key={p.name} className="flex items-center space-x-2 truncate">
-                <span className="w-2.5 h-2.5 rounded-full shrink-0" style={{ backgroundColor: p.color }} />
-                <span className="text-zinc-300 truncate">{p.name}</span>
-                <span className="text-zinc-500 font-mono text-[11px]">{p.value}%</span>
-              </div>
-            ))}
+          <div className="h-52 w-full flex flex-col items-center justify-center border border-white/5 rounded-xl bg-zinc-950/40 text-center">
+            <Cpu className="w-8 h-8 text-zinc-600 mb-2" />
+            <p className="text-xs font-medium text-zinc-400">No model executions</p>
+            <p className="text-[11px] text-zinc-600 mt-1">Provider telemetry will display here after chat sessions.</p>
           </div>
         </div>
       </div>
 
-      {/* Second Row: Latency Breakdown & Status + Activity */}
+      {/* Second Row: Latency Breakdown & System Status */}
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-        {/* Latency Pipeline Breakdown (2 columns) */}
+        {/* Latency Pipeline Breakdown */}
         <div className="lg:col-span-2 glass-panel rounded-2xl p-6 space-y-4">
           <div className="flex items-center justify-between">
             <div>
               <h2 className="text-base font-semibold text-white">Retrieval Pipeline Latency (p95 ms)</h2>
-              <p className="text-xs text-zinc-400">Time spent in each sub-system during a hybrid context retrieval request</p>
+              <p className="text-xs text-zinc-400">Time spent in each sub-system during context retrieval</p>
             </div>
-            <span className="text-xs font-mono text-indigo-400 bg-indigo-500/10 px-2.5 py-1 rounded-full border border-indigo-500/20">
-              Total p95: 228 ms
-            </span>
           </div>
 
-          <div className="h-60 w-full">
-            <ResponsiveContainer width="100%" height="100%">
-              <BarChart data={MOCK_LATENCY_BREAKDOWN} layout="vertical" margin={{ top: 5, right: 20, left: 80, bottom: 5 }}>
-                <CartesianGrid strokeDasharray="3 3" stroke="#27272a" horizontal={false} />
-                <XAxis type="number" stroke="#71717a" fontSize={11} tickLine={false} />
-                <YAxis dataKey="stage" type="category" stroke="#a1a1aa" fontSize={11} tickLine={false} width={130} />
-                <Tooltip
-                  contentStyle={{ backgroundColor: '#12141d', border: '1px solid rgba(255,255,255,0.1)', borderRadius: '12px' }}
-                />
-                <Bar dataKey="p95" fill="#6366f1" radius={[0, 6, 6, 0]} />
-              </BarChart>
-            </ResponsiveContainer>
+          <div className="h-60 w-full flex flex-col items-center justify-center border border-white/5 rounded-xl bg-zinc-950/40 text-center">
+            <Clock className="w-8 h-8 text-zinc-600 mb-2" />
+            <p className="text-xs font-medium text-zinc-400">No retrieval latency benchmarks collected</p>
           </div>
         </div>
 
@@ -226,52 +221,102 @@ export default function DashboardPage() {
         <div className="glass-panel rounded-2xl p-6 space-y-4">
           <div className="flex items-center justify-between border-b border-white/10 pb-3">
             <h2 className="text-base font-semibold text-white flex items-center space-x-2">
-              <Server className="w-4 h-4 text-emerald-400" />
+              <Server className="w-4 h-4 text-indigo-400" />
               <span>System Status</span>
             </h2>
-            <span className="text-xs font-semibold text-emerald-400">100% Healthy</span>
+            <span className={`text-xs font-semibold ${apiConnected ? 'text-emerald-400' : 'text-rose-400'}`}>
+              {apiConnected ? 'Gateway Online' : 'Gateway Offline'}
+            </span>
           </div>
 
           <div className="space-y-3">
-            {MOCK_SYSTEM_STATUS.map((item) => (
-              <div key={item.name} className="flex items-center justify-between p-2.5 rounded-xl bg-zinc-900/60 border border-white/5 text-xs">
-                <div className="flex items-center space-x-2.5">
+            <div className="flex items-center justify-between p-2.5 rounded-xl bg-zinc-900/60 border border-white/5 text-xs">
+              <div className="flex items-center space-x-2.5">
+                {apiConnected ? (
                   <CheckCircle2 className="w-4 h-4 text-emerald-400 shrink-0" />
-                  <div>
-                    <p className="text-zinc-200 font-medium">{item.name}</p>
-                    <p className="text-[10px] text-zinc-500 font-mono">{item.service}</p>
-                  </div>
-                </div>
-                <div className="text-right font-mono">
-                  <p className="text-emerald-400 font-medium">{item.latency_ms} ms</p>
-                  <p className="text-[10px] text-zinc-500">{item.uptime}</p>
+                ) : (
+                  <XCircle className="w-4 h-4 text-rose-400 shrink-0" />
+                )}
+                <div>
+                  <p className="text-zinc-200 font-medium">Rust Gateway API</p>
+                  <p className="text-[10px] text-zinc-500 font-mono">http://localhost:3000</p>
                 </div>
               </div>
-            ))}
+              <div className="text-right font-mono">
+                <p className={apiConnected ? 'text-emerald-400 font-medium' : 'text-rose-400 font-medium'}>
+                  {apiConnected ? 'Healthy' : 'Unreachable'}
+                </p>
+              </div>
+            </div>
+
+            <div className="flex items-center justify-between p-2.5 rounded-xl bg-zinc-900/60 border border-white/5 text-xs">
+              <div className="flex items-center space-x-2.5">
+                <CheckCircle2 className="w-4 h-4 text-emerald-400 shrink-0" />
+                <div>
+                  <p className="text-zinc-200 font-medium">Vector Indexing Engine</p>
+                  <p className="text-[10px] text-zinc-500 font-mono">Qdrant / Memory Store</p>
+                </div>
+              </div>
+              <div className="text-right font-mono">
+                <p className="text-emerald-400 font-medium">Active</p>
+              </div>
+            </div>
           </div>
         </div>
       </div>
 
-      {/* Recent Activity Stream */}
-      <div className="glass-panel rounded-2xl p-6 space-y-4">
-        <h2 className="text-base font-semibold text-white flex items-center space-x-2">
-          <Activity className="w-4 h-4 text-indigo-400" />
-          <span>Recent Activity Stream</span>
-        </h2>
+      {/* Recent Collections & Documents Summary */}
+      <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+        {/* Collections Overview */}
+        <div className="glass-panel rounded-2xl p-6 space-y-4">
+          <h2 className="text-base font-semibold text-white flex items-center space-x-2">
+            <FolderArchive className="w-4 h-4 text-purple-400" />
+            <span>Active Collections ({collections.length})</span>
+          </h2>
 
-        <div className="divide-y divide-white/5">
-          {MOCK_ACTIVITIES.map((act) => (
-            <div key={act.id} className="py-3 flex items-center justify-between text-xs hover:bg-white/[0.02] px-2 rounded-xl transition-colors">
-              <div className="flex items-center space-x-3">
-                <div className={`w-2 h-2 rounded-full ${act.status === 'success' ? 'bg-emerald-400' : act.status === 'error' ? 'bg-rose-500' : 'bg-indigo-400'}`} />
-                <div>
-                  <p className="text-zinc-200 font-medium">{act.title}</p>
-                  <p className="text-zinc-400 text-[11px]">{act.description}</p>
-                </div>
-              </div>
-              <span className="text-zinc-500 font-mono text-[11px]">{act.timestamp}</span>
+          {collections.length === 0 ? (
+            <div className="p-8 text-center border border-white/5 rounded-xl bg-zinc-950/40 text-xs text-zinc-500">
+              No collections found in backend repository.
             </div>
-          ))}
+          ) : (
+            <div className="space-y-2">
+              {collections.slice(0, 5).map((col) => (
+                <div key={col.id} className="p-3 rounded-xl bg-zinc-900/60 border border-white/5 flex items-center justify-between text-xs">
+                  <div>
+                    <p className="font-semibold text-white">{col.name}</p>
+                    <p className="text-[11px] text-zinc-400">{col.description || 'No description'}</p>
+                  </div>
+                  <span className="font-mono text-purple-400 text-xs">{col.documents_count} docs</span>
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+
+        {/* Ingested Documents Overview */}
+        <div className="glass-panel rounded-2xl p-6 space-y-4">
+          <h2 className="text-base font-semibold text-white flex items-center space-x-2">
+            <FileText className="w-4 h-4 text-indigo-400" />
+            <span>Ingested Documents ({documents.length})</span>
+          </h2>
+
+          {documents.length === 0 ? (
+            <div className="p-8 text-center border border-white/5 rounded-xl bg-zinc-950/40 text-xs text-zinc-500">
+              No documents ingested yet.
+            </div>
+          ) : (
+            <div className="space-y-2">
+              {documents.slice(0, 5).map((doc) => (
+                <div key={doc.id} className="p-3 rounded-xl bg-zinc-900/60 border border-white/5 flex items-center justify-between text-xs">
+                  <div>
+                    <p className="font-semibold text-white">{doc.name}</p>
+                    <p className="text-[11px] text-zinc-400">ID: {doc.id}</p>
+                  </div>
+                  <span className="font-mono text-emerald-400 text-xs">{doc.chunks_count} chunks</span>
+                </div>
+              ))}
+            </div>
+          )}
         </div>
       </div>
     </div>

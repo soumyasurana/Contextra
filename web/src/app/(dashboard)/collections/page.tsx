@@ -1,33 +1,37 @@
 'use client';
 
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import {
   FolderArchive,
   Plus,
   FileText,
   Layers,
-  Calendar,
-  MoreVertical,
   Edit2,
   Trash2,
   Search,
   X,
-  Sparkles,
+  RefreshCw,
 } from 'lucide-react';
 import { useAppStore } from '@/lib/store';
 import { CollectionResource } from '@/types';
+import { api } from '@/lib/api';
 import { toast } from 'sonner';
 
 export default function CollectionsPage() {
-  const { collections, addCollection, deleteCollection, updateCollection } = useAppStore();
+  const { collections, collectionsLoading, settings, fetchCollections, addCollection, deleteCollection, updateCollection } = useAppStore();
   const [searchQuery, setSearchQuery] = useState('');
   const [createModalOpen, setCreateModalOpen] = useState(false);
   const [editingCol, setEditingCol] = useState<CollectionResource | null>(null);
+  const [isSubmitting, setIsSubmitting] = useState(false);
 
   // Form states
   const [name, setName] = useState('');
   const [description, setDescription] = useState('');
+
+  useEffect(() => {
+    fetchCollections();
+  }, [fetchCollections]);
 
   const filteredCollections = collections.filter(
     (c) =>
@@ -35,30 +39,44 @@ export default function CollectionsPage() {
       c.description.toLowerCase().includes(searchQuery.toLowerCase())
   );
 
-  const handleCreate = (e: React.FormEvent) => {
+  const handleCreate = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!name.trim()) return;
+    if (!name.trim() || isSubmitting) return;
 
-    if (editingCol) {
-      updateCollection(editingCol.id, name, description);
-      toast.success(`Updated collection "${name}"`);
-      setEditingCol(null);
-    } else {
-      const newCol: CollectionResource = {
-        id: `col_${Date.now()}`,
-        name,
-        description,
-        documents_count: 0,
-        chunks_count: 0,
-        created_at: new Date().toISOString().split('T')[0],
-      };
-      addCollection(newCol);
-      toast.success(`Created collection "${name}"`);
+    setIsSubmitting(true);
+    try {
+      if (editingCol) {
+        updateCollection(editingCol.id, name, description);
+        toast.success(`Updated collection "${name}"`);
+        setEditingCol(null);
+      } else {
+        const created = await api.createCollection(name, { description }, settings.api_key);
+        if (created) {
+          addCollection(created);
+          toast.success(`Created collection "${name}"`);
+        } else {
+          // Fallback local creation if backend offline
+          const newCol: CollectionResource = {
+            id: `col_${Date.now()}`,
+            name,
+            description,
+            documents_count: 0,
+            chunks_count: 0,
+            created_at: new Date().toISOString().split('T')[0],
+          };
+          addCollection(newCol);
+          toast.success(`Created collection "${name}" (local)`);
+        }
+      }
+
+      setName('');
+      setDescription('');
+      setCreateModalOpen(false);
+    } catch {
+      toast.error('Failed to create collection');
+    } finally {
+      setIsSubmitting(false);
     }
-
-    setName('');
-    setDescription('');
-    setCreateModalOpen(false);
   };
 
   const openEdit = (col: CollectionResource) => {
@@ -82,18 +100,27 @@ export default function CollectionsPage() {
           </p>
         </div>
 
-        <button
-          onClick={() => {
-            setEditingCol(null);
-            setName('');
-            setDescription('');
-            setCreateModalOpen(true);
-          }}
-          className="px-4 py-2.5 rounded-xl bg-gradient-to-r from-purple-600 to-indigo-600 hover:from-purple-500 hover:to-indigo-500 text-white font-medium text-sm flex items-center justify-center space-x-2 shadow-lg shadow-purple-500/25 transition-all hover:scale-[1.02]"
-        >
-          <Plus className="w-4 h-4" />
-          <span>New Collection</span>
-        </button>
+        <div className="flex items-center space-x-3">
+          <button
+            onClick={() => fetchCollections()}
+            className="px-3.5 py-2.5 rounded-xl glass-card text-xs text-zinc-300 hover:text-white flex items-center space-x-2 transition-colors"
+          >
+            <RefreshCw className={`w-4 h-4 ${collectionsLoading ? 'animate-spin' : ''}`} />
+            <span>Sync</span>
+          </button>
+          <button
+            onClick={() => {
+              setEditingCol(null);
+              setName('');
+              setDescription('');
+              setCreateModalOpen(true);
+            }}
+            className="px-4 py-2.5 rounded-xl bg-gradient-to-r from-purple-600 to-indigo-600 hover:from-purple-500 hover:to-indigo-500 text-white font-medium text-sm flex items-center justify-center space-x-2 shadow-lg shadow-purple-500/25 transition-all hover:scale-[1.02]"
+          >
+            <Plus className="w-4 h-4" />
+            <span>New Collection</span>
+          </button>
+        </div>
       </div>
 
       {/* Search Bar */}
@@ -111,73 +138,86 @@ export default function CollectionsPage() {
       </div>
 
       {/* Collection Grid */}
-      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-        {filteredCollections.map((col, idx) => (
-          <motion.div
-            key={col.id}
-            initial={{ opacity: 0, y: 15 }}
-            animate={{ opacity: 1, y: 0 }}
-            transition={{ duration: 0.2, delay: idx * 0.05 }}
-            className="glass-card glass-card-hover rounded-2xl p-6 flex flex-col justify-between space-y-4 group relative"
-          >
-            <div className="space-y-3">
-              <div className="flex items-center justify-between">
-                <div className="w-10 h-10 rounded-xl bg-purple-500/10 border border-purple-500/20 text-purple-400 flex items-center justify-center shadow-inner">
-                  <FolderArchive className="w-5 h-5" />
+      {collectionsLoading ? (
+        <div className="p-12 text-center text-zinc-400 text-sm flex items-center justify-center space-x-2">
+          <RefreshCw className="w-4 h-4 animate-spin text-purple-400" />
+          <span>Loading collections from backend...</span>
+        </div>
+      ) : filteredCollections.length === 0 ? (
+        <div className="glass-panel rounded-2xl p-12 text-center text-zinc-500 space-y-3">
+          <FolderArchive className="w-12 h-12 text-zinc-600 mx-auto" />
+          <p className="text-sm font-semibold text-zinc-300">No collections available</p>
+          <p className="text-xs text-zinc-500">Create a collection to organize your vector embeddings.</p>
+        </div>
+      ) : (
+        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+          {filteredCollections.map((col, idx) => (
+            <motion.div
+              key={col.id}
+              initial={{ opacity: 0, y: 15 }}
+              animate={{ opacity: 1, y: 0 }}
+              transition={{ duration: 0.2, delay: idx * 0.05 }}
+              className="glass-card glass-card-hover rounded-2xl p-6 flex flex-col justify-between space-y-4 group relative"
+            >
+              <div className="space-y-3">
+                <div className="flex items-center justify-between">
+                  <div className="w-10 h-10 rounded-xl bg-purple-500/10 border border-purple-500/20 text-purple-400 flex items-center justify-center shadow-inner">
+                    <FolderArchive className="w-5 h-5" />
+                  </div>
+
+                  <div className="flex items-center space-x-1 opacity-0 group-hover:opacity-100 transition-opacity">
+                    <button
+                      onClick={() => openEdit(col)}
+                      className="p-1.5 rounded-lg text-zinc-400 hover:text-white hover:bg-zinc-800"
+                      title="Rename / Edit"
+                    >
+                      <Edit2 className="w-3.5 h-3.5" />
+                    </button>
+                    <button
+                      onClick={() => {
+                        deleteCollection(col.id);
+                        toast.success(`Deleted collection "${col.name}"`);
+                      }}
+                      className="p-1.5 rounded-lg text-zinc-400 hover:text-rose-400 hover:bg-rose-900/40"
+                      title="Delete"
+                    >
+                      <Trash2 className="w-3.5 h-3.5" />
+                    </button>
+                  </div>
                 </div>
 
-                <div className="flex items-center space-x-1 opacity-0 group-hover:opacity-100 transition-opacity">
-                  <button
-                    onClick={() => openEdit(col)}
-                    className="p-1.5 rounded-lg text-zinc-400 hover:text-white hover:bg-zinc-800"
-                    title="Rename / Edit"
-                  >
-                    <Edit2 className="w-3.5 h-3.5" />
-                  </button>
-                  <button
-                    onClick={() => {
-                      deleteCollection(col.id);
-                      toast.success(`Deleted collection "${col.name}"`);
-                    }}
-                    className="p-1.5 rounded-lg text-zinc-400 hover:text-rose-400 hover:bg-rose-900/40"
-                    title="Delete"
-                  >
-                    <Trash2 className="w-3.5 h-3.5" />
-                  </button>
+                <div>
+                  <h3 className="text-base font-bold text-white group-hover:text-purple-300 transition-colors">
+                    {col.name}
+                  </h3>
+                  <p className="text-xs text-zinc-400 mt-1 line-clamp-2">{col.description || 'No description provided'}</p>
                 </div>
               </div>
 
-              <div>
-                <h3 className="text-base font-bold text-white group-hover:text-purple-300 transition-colors">
-                  {col.name}
-                </h3>
-                <p className="text-xs text-zinc-400 mt-1 line-clamp-2">{col.description}</p>
+              <div className="pt-4 border-t border-white/5 grid grid-cols-3 gap-2 text-xs text-zinc-400 font-mono">
+                <div className="flex flex-col">
+                  <span className="text-[10px] uppercase text-zinc-500 font-sans">Docs</span>
+                  <span className="text-zinc-200 font-semibold flex items-center space-x-1 mt-0.5">
+                    <FileText className="w-3 h-3 text-purple-400" />
+                    <span>{col.documents_count}</span>
+                  </span>
+                </div>
+                <div className="flex flex-col">
+                  <span className="text-[10px] uppercase text-zinc-500 font-sans">Chunks</span>
+                  <span className="text-zinc-200 font-semibold flex items-center space-x-1 mt-0.5">
+                    <Layers className="w-3 h-3 text-indigo-400" />
+                    <span>{col.chunks_count}</span>
+                  </span>
+                </div>
+                <div className="flex flex-col">
+                  <span className="text-[10px] uppercase text-zinc-500 font-sans">ID</span>
+                  <span className="text-zinc-400 text-[10px] truncate mt-0.5">{col.id}</span>
+                </div>
               </div>
-            </div>
-
-            <div className="pt-4 border-t border-white/5 grid grid-cols-3 gap-2 text-xs text-zinc-400 font-mono">
-              <div className="flex flex-col">
-                <span className="text-[10px] uppercase text-zinc-500 font-sans">Docs</span>
-                <span className="text-zinc-200 font-semibold flex items-center space-x-1 mt-0.5">
-                  <FileText className="w-3 h-3 text-purple-400" />
-                  <span>{col.documents_count}</span>
-                </span>
-              </div>
-              <div className="flex flex-col">
-                <span className="text-[10px] uppercase text-zinc-500 font-sans">Chunks</span>
-                <span className="text-zinc-200 font-semibold flex items-center space-x-1 mt-0.5">
-                  <Layers className="w-3 h-3 text-indigo-400" />
-                  <span>{col.chunks_count}</span>
-                </span>
-              </div>
-              <div className="flex flex-col">
-                <span className="text-[10px] uppercase text-zinc-500 font-sans">Created</span>
-                <span className="text-zinc-400 text-[11px] mt-0.5">{col.created_at}</span>
-              </div>
-            </div>
-          </motion.div>
-        ))}
-      </div>
+            </motion.div>
+          ))}
+        </div>
+      )}
 
       {/* Create / Edit Modal */}
       <AnimatePresence>
@@ -236,9 +276,11 @@ export default function CollectionsPage() {
                   </button>
                   <button
                     type="submit"
-                    className="px-4 py-2 bg-gradient-to-r from-purple-600 to-indigo-600 hover:from-purple-500 hover:to-indigo-500 text-white rounded-xl text-xs font-semibold shadow-md"
+                    disabled={isSubmitting}
+                    className="px-4 py-2 bg-gradient-to-r from-purple-600 to-indigo-600 hover:from-purple-500 hover:to-indigo-500 text-white rounded-xl text-xs font-semibold shadow-md flex items-center space-x-2"
                   >
-                    {editingCol ? 'Save Changes' : 'Create Collection'}
+                    {isSubmitting && <RefreshCw className="w-3.5 h-3.5 animate-spin" />}
+                    <span>{editingCol ? 'Save Changes' : 'Create Collection'}</span>
                   </button>
                 </div>
               </form>

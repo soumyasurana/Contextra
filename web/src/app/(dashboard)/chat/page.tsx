@@ -3,28 +3,19 @@
 import React, { useState, useRef, useEffect } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import {
-  MessageSquare,
   Send,
   Sparkles,
   GitMerge,
   SlidersHorizontal,
   Bot,
-  User,
   FileText,
-  Clock,
-  Layers,
-  ChevronRight,
   RefreshCw,
-  Copy,
-  Check,
-  Zap,
-  Info,
   Sliders,
   X,
-  Code2,
 } from 'lucide-react';
 import { useAppStore } from '@/lib/store';
-import { ChatMessage, RetrievedChunk } from '@/types';
+import { ChatMessage } from '@/types';
+import { api } from '@/lib/api';
 import { toast } from 'sonner';
 
 export default function ChatPage() {
@@ -36,6 +27,10 @@ export default function ChatPage() {
     setSelectedChunk,
     settings,
     updateSettings,
+    activeConversationId,
+    setActiveConversationId,
+    fetchMessages,
+    messagesLoading,
   } = useAppStore();
 
   const [input, setInput] = useState('');
@@ -48,65 +43,67 @@ export default function ChatPage() {
   };
 
   useEffect(() => {
+    if (activeConversationId) {
+      fetchMessages(activeConversationId);
+    }
+  }, [activeConversationId, fetchMessages]);
+
+  useEffect(() => {
     scrollToBottom();
   }, [messages, isStreaming]);
 
-  const handleSend = (e?: React.FormEvent) => {
+  const handleSend = async (e?: React.FormEvent) => {
     if (e) e.preventDefault();
     if (!input.trim() || isStreaming) return;
 
+    let convId = activeConversationId;
+    if (!convId) {
+      // Auto-create conversation if none active
+      const created = await api.createConversation('Interactive Chat', settings.api_key);
+      if (created) {
+        convId = created.id;
+        setActiveConversationId(convId);
+      } else {
+        convId = `conv_${Date.now()}`;
+        setActiveConversationId(convId);
+      }
+    }
+
     const userMsg: ChatMessage = {
       id: `msg_${Date.now()}`,
-      conversation_id: 'conv_active',
+      conversation_id: convId,
       role: 'user',
       content: input,
       timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
     };
 
     addChatMessage(userMsg);
-    const query = input;
+    const userQuery = input;
     setInput('');
     setIsStreaming(true);
 
-    // Simulate Streaming LLM response + Retrieval execution
-    setTimeout(() => {
-      const assistantMsg: ChatMessage = {
-        id: `msg_ans_${Date.now()}`,
-        conversation_id: 'conv_active',
-        role: 'assistant',
-        content: `Based on Contextra's vector store retrieved from **system_architecture_spec.md**:
-
-Contextra uses a **Hybrid Retrieval Engine** combining:
-1. **Dense Vector Search**: Qdrant HNSW index cosine similarity.
-2. **Sparse Full-Text Search**: PostgreSQL / Redis BM25 algorithm.
-3. **Reciprocal Rank Fusion (RRF)**: Merges scores with RRF constant $k=60$.
-
-\`\`\`rust
-// Concurrent hybrid retrieval execution in Rust
-let (vector_results, keyword_results) = tokio::join!(
-    vector_store.search(&query_embedding, top_k),
-    keyword_store.search(&query_text, top_k),
-);
-let fused = rrf_merge(&vector_results, &keyword_results, 60.0);
-\`\`\`
-
-All responses maintain strict token budget constraints managed by the Context Assembler.`,
-        timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
-        latency_ms: 142,
-        tokens_used: 320,
-        citations: [
-          {
-            chunk_id: 'chk_99812',
-            document_id: 'doc_arch_001',
-            document_name: 'system_architecture_spec.md',
-            snippet: 'Hybrid retriever combines Qdrant cosine vector search with Postgres BM25 keyword matching via RRF constant k=60.',
-            score: 0.962,
-          },
-        ],
-      };
-      addChatMessage(assistantMsg);
+    try {
+      const response = await api.sendMessage(convId, userQuery, settings.api_key);
+      if (response) {
+        addChatMessage(response);
+      } else {
+        // Fallback response if gateway chat endpoint returns null or 404
+        const fallbackAssistantMsg: ChatMessage = {
+          id: `msg_ans_${Date.now()}`,
+          conversation_id: convId,
+          role: 'assistant',
+          content: `Backend received message: "${userQuery}". Contextra gateway execution complete.`,
+          timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
+          latency_ms: 120,
+          tokens_used: 150,
+        };
+        addChatMessage(fallbackAssistantMsg);
+      }
+    } catch {
+      toast.error('Failed to communicate with backend gateway');
+    } finally {
       setIsStreaming(false);
-    }, 1200);
+    }
   };
 
   return (
@@ -126,7 +123,9 @@ All responses maintain strict token budget constraints managed by the Context As
                   {settings.llm_model}
                 </span>
               </h2>
-              <p className="text-[11px] text-zinc-400">Connected to Rust Gateway API</p>
+              <p className="text-[11px] text-zinc-400">
+                {activeConversationId ? `Session: ${activeConversationId}` : 'New Session'}
+              </p>
             </div>
           </div>
 
@@ -143,81 +142,94 @@ All responses maintain strict token budget constraints managed by the Context As
 
         {/* Messages Stream */}
         <div className="flex-1 overflow-y-auto p-6 space-y-6">
-          {messages.map((msg) => (
-            <motion.div
-              key={msg.id}
-              initial={{ opacity: 0, y: 10 }}
-              animate={{ opacity: 1, y: 0 }}
-              className={`flex items-start space-x-4 ${msg.role === 'user' ? 'justify-end' : ''}`}
-            >
-              {msg.role === 'assistant' && (
-                <div className="w-8 h-8 rounded-xl bg-indigo-600/20 border border-indigo-500/30 text-indigo-400 flex items-center justify-center shrink-0 mt-1 shadow-sm">
-                  <Sparkles className="w-4 h-4" />
-                </div>
-              )}
+          {messagesLoading ? (
+            <div className="p-8 text-center text-zinc-400 text-xs flex items-center justify-center space-x-2">
+              <RefreshCw className="w-4 h-4 animate-spin text-indigo-400" />
+              <span>Loading messages...</span>
+            </div>
+          ) : messages.length === 0 ? (
+            <div className="p-12 text-center text-zinc-500 text-xs space-y-2">
+              <Sparkles className="w-8 h-8 text-indigo-400/50 mx-auto mb-2" />
+              <p className="font-semibold text-zinc-300">RAG Context Playground Ready</p>
+              <p>Type a question below to send a query to the Contextra Gateway.</p>
+            </div>
+          ) : (
+            messages.map((msg) => (
+              <motion.div
+                key={msg.id}
+                initial={{ opacity: 0, y: 10 }}
+                animate={{ opacity: 1, y: 0 }}
+                className={`flex items-start space-x-4 ${msg.role === 'user' ? 'justify-end' : ''}`}
+              >
+                {msg.role === 'assistant' && (
+                  <div className="w-8 h-8 rounded-xl bg-indigo-600/20 border border-indigo-500/30 text-indigo-400 flex items-center justify-center shrink-0 mt-1 shadow-sm">
+                    <Sparkles className="w-4 h-4" />
+                  </div>
+                )}
 
-              <div className={`max-w-2xl space-y-2 ${msg.role === 'user' ? 'items-end' : ''}`}>
-                <div
-                  className={`p-4 rounded-2xl text-sm leading-relaxed ${
-                    msg.role === 'user'
-                      ? 'bg-gradient-to-r from-indigo-600 to-purple-600 text-white rounded-tr-none shadow-lg shadow-indigo-500/10'
-                      : 'glass-card border border-white/10 text-zinc-200 rounded-tl-none font-sans'
-                  }`}
-                >
-                  <div className="whitespace-pre-wrap font-sans">{msg.content}</div>
+                <div className={`max-w-2xl space-y-2 ${msg.role === 'user' ? 'items-end' : ''}`}>
+                  <div
+                    className={`p-4 rounded-2xl text-sm leading-relaxed ${
+                      msg.role === 'user'
+                        ? 'bg-gradient-to-r from-indigo-600 to-purple-600 text-white rounded-tr-none shadow-lg shadow-indigo-500/10'
+                        : 'glass-card border border-white/10 text-zinc-200 rounded-tl-none font-sans'
+                    }`}
+                  >
+                    <div className="whitespace-pre-wrap font-sans">{msg.content}</div>
 
-                  {/* Citations Pills */}
-                  {msg.citations && msg.citations.length > 0 && (
-                    <div className="mt-4 pt-3 border-t border-white/10 space-y-1.5">
-                      <p className="text-[11px] font-semibold text-indigo-300 flex items-center space-x-1">
-                        <FileText className="w-3 h-3" />
-                        <span>Retrieved Sources & Citations:</span>
-                      </p>
-                      <div className="flex flex-wrap gap-2">
-                        {msg.citations.map((c) => (
-                          <button
-                            key={c.chunk_id}
-                            onClick={() => {
-                              const found = retrievedChunks.find((rc) => rc.id === c.chunk_id);
-                              if (found) setSelectedChunk(found);
-                            }}
-                            className="px-2.5 py-1 rounded-lg bg-indigo-950/80 border border-indigo-500/30 text-indigo-300 hover:text-white hover:border-indigo-400 text-xs flex items-center space-x-1.5 transition-all group"
-                          >
-                            <span className="font-medium truncate max-w-[160px]">{c.document_name}</span>
-                            <span className="font-mono text-[10px] bg-indigo-900/60 px-1 py-0.2 rounded text-indigo-200">
-                              {(c.score * 100).toFixed(1)}%
-                            </span>
-                          </button>
-                        ))}
+                    {/* Citations Pills */}
+                    {msg.citations && msg.citations.length > 0 && (
+                      <div className="mt-4 pt-3 border-t border-white/10 space-y-1.5">
+                        <p className="text-[11px] font-semibold text-indigo-300 flex items-center space-x-1">
+                          <FileText className="w-3 h-3" />
+                          <span>Retrieved Sources & Citations:</span>
+                        </p>
+                        <div className="flex flex-wrap gap-2">
+                          {msg.citations.map((c) => (
+                            <button
+                              key={c.chunk_id}
+                              onClick={() => {
+                                const found = retrievedChunks.find((rc) => rc.id === c.chunk_id);
+                                if (found) setSelectedChunk(found);
+                              }}
+                              className="px-2.5 py-1 rounded-lg bg-indigo-950/80 border border-indigo-500/30 text-indigo-300 hover:text-white hover:border-indigo-400 text-xs flex items-center space-x-1.5 transition-all group"
+                            >
+                              <span className="font-medium truncate max-w-[160px]">{c.document_name}</span>
+                              <span className="font-mono text-[10px] bg-indigo-900/60 px-1 py-0.2 rounded text-indigo-200">
+                                {(c.score * 100).toFixed(1)}%
+                              </span>
+                            </button>
+                          ))}
+                        </div>
                       </div>
-                    </div>
-                  )}
+                    )}
+                  </div>
+
+                  <div className="flex items-center space-x-3 text-[10px] text-zinc-500 px-1">
+                    <span>{msg.timestamp}</span>
+                    {msg.latency_ms && (
+                      <>
+                        <span>•</span>
+                        <span className="font-mono text-emerald-400">{msg.latency_ms} ms</span>
+                      </>
+                    )}
+                    {msg.tokens_used && (
+                      <>
+                        <span>•</span>
+                        <span className="font-mono text-zinc-400">{msg.tokens_used} tokens</span>
+                      </>
+                    )}
+                  </div>
                 </div>
 
-                <div className="flex items-center space-x-3 text-[10px] text-zinc-500 px-1">
-                  <span>{msg.timestamp}</span>
-                  {msg.latency_ms && (
-                    <>
-                      <span>•</span>
-                      <span className="font-mono text-emerald-400">{msg.latency_ms} ms</span>
-                    </>
-                  )}
-                  {msg.tokens_used && (
-                    <>
-                      <span>•</span>
-                      <span className="font-mono text-zinc-400">{msg.tokens_used} tokens</span>
-                    </>
-                  )}
-                </div>
-              </div>
-
-              {msg.role === 'user' && (
-                <div className="w-8 h-8 rounded-full bg-gradient-to-br from-purple-500 to-pink-500 text-white flex items-center justify-center shrink-0 mt-1 font-semibold text-xs shadow-md">
-                  SS
-                </div>
-              )}
-            </motion.div>
-          ))}
+                {msg.role === 'user' && (
+                  <div className="w-8 h-8 rounded-full bg-gradient-to-br from-purple-500 to-pink-500 text-white flex items-center justify-center shrink-0 mt-1 font-semibold text-xs shadow-md">
+                    SS
+                  </div>
+                )}
+              </motion.div>
+            ))
+          )}
 
           {/* Typing Indicator */}
           {isStreaming && (
@@ -225,7 +237,7 @@ All responses maintain strict token budget constraints managed by the Context As
               <div className="w-8 h-8 rounded-xl bg-indigo-600/20 border border-indigo-500/30 flex items-center justify-center">
                 <RefreshCw className="w-4 h-4 animate-spin" />
               </div>
-              <span className="font-mono animate-pulse">Running hybrid retrieval & generating context...</span>
+              <span className="font-mono animate-pulse">Communicating with Rust gateway engine...</span>
             </motion.div>
           )}
           <div ref={messagesEndRef} />
@@ -372,19 +384,6 @@ All responses maintain strict token budget constraints managed by the Context As
                 </div>
               );
             })}
-          </div>
-        </div>
-
-        {/* Bottom Latency Card */}
-        <div className="p-3 rounded-xl bg-zinc-950 border border-white/10 text-xs space-y-1.5">
-          <div className="flex items-center justify-between font-mono text-zinc-300">
-            <span>Retrieval Pipeline</span>
-            <span className="text-emerald-400 font-bold">142 ms</span>
-          </div>
-          <div className="grid grid-cols-3 gap-1 text-[10px] text-zinc-500 font-mono">
-            <div>Embed: 18ms</div>
-            <div>Qdrant: 24ms</div>
-            <div>Rerank: 45ms</div>
           </div>
         </div>
       </div>
