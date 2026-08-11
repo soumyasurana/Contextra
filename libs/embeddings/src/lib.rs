@@ -1,6 +1,5 @@
 use async_trait::async_trait;
 use errors::ContextraError;
-use futures_util::{StreamExt, stream};
 use reqwest::{Client, StatusCode};
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};

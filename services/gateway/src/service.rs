@@ -117,9 +117,9 @@ impl ProductionGatewayService {
         let doc_repo = DocumentRepository::new(pool.clone());
         let col_repo = CollectionRepository::new(pool.clone());
         let conv_repo = ConversationRepository::new(pool.clone());
-        let embedding_provider: Arc<dyn EmbeddingProvider> = Arc::new(GatewayEmbeddingProvider::new(
-            settings.providers.openai_api_key.clone(),
-        ));
+        let embedding_provider: Arc<dyn EmbeddingProvider> = Arc::new(
+            GatewayEmbeddingProvider::new(settings.providers.openai_api_key.clone()),
+        );
 
         Self {
             api_key_store,
