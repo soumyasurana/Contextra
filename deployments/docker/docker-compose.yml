@@ -88,7 +88,7 @@ services:
       - "3001:3000"
     environment:
       NODE_ENV: production
-      NEXT_PUBLIC_GATEWAY_URL: http://gateway:3000
+      NEXT_PUBLIC_GATEWAY_URL: https://contextra.blocklogsecurity.com
     depends_on:
       gateway:
         condition: service_started
