@@ -5,7 +5,7 @@ import {
   ChatMessage,
 } from '@/types';
 
-export const GATEWAY_URL = process.env.NEXT_PUBLIC_GATEWAY_URL || 'https://contextra.blocklogsecurity.com/api';
+export const GATEWAY_URL = process.env.NEXT_PUBLIC_GATEWAY_URL || 'https://contextra.blocklogsecurity.com';
 
 async function fetchWithTimeout(url: string, options: RequestInit = {}, timeoutMs = 5000) {
   const controller = new AbortController();

@@ -240,7 +240,7 @@ export default function DashboardPage() {
                 )}
                 <div>
                   <p className="text-zinc-200 font-medium">Rust Gateway API</p>
-                  <p className="text-[10px] text-zinc-500 font-mono">http://localhost:3000</p>
+                  <p className="text-[10px] text-zinc-500 font-mono">{GATEWAY_URL}</p>
                 </div>
               </div>
               <div className="text-right font-mono">
