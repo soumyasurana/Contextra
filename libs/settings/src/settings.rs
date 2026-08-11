@@ -76,6 +76,29 @@ impl Settings {
         {
             builder = builder.set_override("redis.url", redis_url)?;
         }
+        if let Ok(database_url) = env::var("DATABASE_URL")
+            && env::var("CONTEXTRA__DATABASE__URL").is_err()
+        {
+            builder = builder.set_override("database.url", database_url)?;
+        }
+
+        if let Ok(qdrant_url) = env::var("QDRANT_URL")
+            && env::var("CONTEXTRA__VECTOR_STORE__URL").is_err()
+        {
+            builder = builder.set_override("vector_store.url", qdrant_url)?;
+        }
+
+        if let Ok(server_host) = env::var("SERVER_HOST")
+            && env::var("CONTEXTRA__SERVER__HOST").is_err()
+        {
+            builder = builder.set_override("server.host", server_host)?;
+        }
+
+        if let Ok(server_port) = env::var("SERVER_PORT")
+            && env::var("CONTEXTRA__SERVER__PORT").is_err()
+        {
+            builder = builder.set_override("server.port", server_port)?;
+        }
 
         let config = builder.build()?;
         Ok(config.try_deserialize()?)
