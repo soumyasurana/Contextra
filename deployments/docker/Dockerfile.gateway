@@ -11,6 +11,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 
 # Copy workspace configuration, dependency manifests, and workspace crates
 COPY Cargo.toml Cargo.lock ./
+COPY configs ./configs
 COPY libs ./libs
 COPY services ./services
 COPY tests ./tests
@@ -30,6 +31,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     && rm -rf /var/lib/apt/lists/*
 
 COPY --from=builder /app/target/release/gateway /app/gateway
+COPY --from=builder /app/configs /app/configs
 
 EXPOSE 3000
 

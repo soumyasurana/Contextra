@@ -1,3 +1,5 @@
+pub mod service;
+
 use async_trait::async_trait;
 use auth::AuthContext;
 use axum::body::Body;

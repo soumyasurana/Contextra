@@ -85,6 +85,60 @@ impl DocumentRepository {
 
         Ok(chunks)
     }
+
+    pub async fn list(
+        &self,
+        collection_id: Option<CollectionId>,
+        limit: i64,
+        offset: i64,
+    ) -> Result<Vec<Document>, ContextraError> {
+        let records = if let Some(cid) = collection_id {
+            sqlx::query_as::<_, DocumentRow>(
+                r#"
+                SELECT id, collection_id, content, metadata
+                FROM documents
+                WHERE collection_id = $1
+                ORDER BY id
+                LIMIT $2 OFFSET $3
+                "#,
+            )
+            .bind(Uuid::from(cid))
+            .bind(limit)
+            .bind(offset)
+            .fetch_all(self.pool.inner())
+            .await
+        } else {
+            sqlx::query_as::<_, DocumentRow>(
+                r#"
+                SELECT id, collection_id, content, metadata
+                FROM documents
+                ORDER BY id
+                LIMIT $1 OFFSET $2
+                "#,
+            )
+            .bind(limit)
+            .bind(offset)
+            .fetch_all(self.pool.inner())
+            .await
+        }
+        .map_err(|e| ContextraError::StorageError(format!("Failed to list documents: {}", e)))?;
+
+        let mut documents = Vec::new();
+        for record in records {
+            let metadata = serde_json::from_value(record.metadata).map_err(|e| {
+                ContextraError::StorageError(format!("Failed to deserialize metadata: {}", e))
+            })?;
+
+            documents.push(Document {
+                id: DocumentId::from(record.id),
+                collection_id: CollectionId::from(record.collection_id),
+                content: record.content,
+                metadata,
+            });
+        }
+
+        Ok(documents)
+    }
 }
 
 #[async_trait]

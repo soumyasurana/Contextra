@@ -5,6 +5,7 @@ use reqwest::{Client, StatusCode};
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 use std::collections::HashMap;
+use std::sync::Arc;
 use std::time::Duration;
 use storage::cache::Cache;
 use thiserror::Error;
@@ -448,10 +449,10 @@ pub async fn embed_batched<P>(
     provider: &P,
     inputs: &[String],
     max_batch_size: usize,
-    max_concurrent_batches: usize,
+    _max_concurrent_batches: usize,
 ) -> Result<Vec<Embedding>, EmbeddingError>
 where
-    P: EmbeddingProvider,
+    P: EmbeddingProvider + ?Sized,
 {
     validate_inputs(inputs)?;
     if max_batch_size == 0 {
@@ -460,23 +461,12 @@ where
         ));
     }
 
-    let concurrency = max_concurrent_batches.max(1);
-    let chunks = inputs
-        .chunks(max_batch_size)
-        .enumerate()
-        .map(|(index, chunk)| (index, chunk.to_vec()));
-
-    let mut chunk_results = stream::iter(chunks)
-        .map(|(index, chunk)| async move {
-            let embeddings = provider.embed_batch(&chunk).await?;
-            validate_embedding_count(chunk.len(), embeddings.len())?;
-            Ok::<_, EmbeddingError>((index, embeddings))
-        })
-        .buffer_unordered(concurrency)
-        .collect::<Vec<_>>()
-        .await
-        .into_iter()
-        .collect::<Result<Vec<_>, _>>()?;
+    let mut chunk_results = Vec::new();
+    for (index, chunk) in inputs.chunks(max_batch_size).enumerate() {
+        let embeddings = provider.embed_batch(chunk).await?;
+        validate_embedding_count(chunk.len(), embeddings.len())?;
+        chunk_results.push((index, embeddings));
+    }
 
     chunk_results.sort_by_key(|(index, _)| *index);
 
@@ -523,6 +513,21 @@ fn map_status_error(status: StatusCode, body: String) -> EmbeddingError {
         StatusCode::UNAUTHORIZED | StatusCode::FORBIDDEN => EmbeddingError::Authentication(body),
         StatusCode::TOO_MANY_REQUESTS => EmbeddingError::RateLimited(body),
         _ => EmbeddingError::HttpStatus { status, body },
+    }
+}
+
+#[async_trait]
+impl<T: EmbeddingProvider + ?Sized + Send + Sync> EmbeddingProvider for Arc<T> {
+    async fn embed_batch(&self, inputs: &[String]) -> Result<Vec<Embedding>, EmbeddingError> {
+        self.as_ref().embed_batch(inputs).await
+    }
+
+    fn dimensions(&self) -> usize {
+        self.as_ref().dimensions()
+    }
+
+    fn model_name(&self) -> &str {
+        self.as_ref().model_name()
     }
 }
 

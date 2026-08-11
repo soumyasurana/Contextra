@@ -29,6 +29,9 @@ pub enum ContextraError {
 
     #[error("Internal error: {0}")]
     Internal(String),
+
+    #[error("Service unavailable: {0}")]
+    ServiceUnavailable(String),
 }
 
 impl ContextraError {
@@ -43,6 +46,7 @@ impl ContextraError {
             Self::ProviderError(_) => "PROVIDER_ERROR",
             Self::StorageError(_) => "STORAGE_ERROR",
             Self::Internal(_) => "INTERNAL_ERROR",
+            Self::ServiceUnavailable(_) => "SERVICE_UNAVAILABLE",
         }
     }
 
@@ -57,6 +61,7 @@ impl ContextraError {
             Self::ProviderError(_) => StatusCode::BAD_GATEWAY,
             Self::StorageError(_) => StatusCode::INTERNAL_SERVER_ERROR,
             Self::Internal(_) => StatusCode::INTERNAL_SERVER_ERROR,
+            Self::ServiceUnavailable(_) => StatusCode::SERVICE_UNAVAILABLE,
         }
     }
 }

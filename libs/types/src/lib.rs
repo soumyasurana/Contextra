@@ -58,6 +58,14 @@ define_id!(ConversationId);
 
 pub type Metadata = HashMap<String, serde_json::Value>;
 
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct Collection {
+    pub id: CollectionId,
+    pub name: String,
+    #[serde(default)]
+    pub metadata: Metadata,
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]
 pub enum Role {

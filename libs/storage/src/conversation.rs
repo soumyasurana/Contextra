@@ -3,8 +3,15 @@ use crate::repository::Repository;
 use async_trait::async_trait;
 use errors::ContextraError;
 use sqlx::FromRow;
-use types::{ConversationId, Message, Role};
+use types::{ConversationId, Message, Metadata, Role};
 use uuid::Uuid;
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct ConversationRecord {
+    pub id: ConversationId,
+    pub title: Option<String>,
+    pub metadata: Metadata,
+}
 
 pub struct ConversationRepository {
     pool: PgPool,
@@ -29,6 +36,7 @@ impl ConversationRepository {
             r#"
             INSERT INTO conversations (id)
             VALUES ($1)
+            ON CONFLICT (id) DO NOTHING
             "#,
         )
         .bind(Uuid::from(*id))
@@ -39,6 +47,113 @@ impl ConversationRepository {
         })?;
 
         Ok(())
+    }
+
+    pub async fn create_conversation_with_details(
+        &self,
+        id: &ConversationId,
+        title: Option<&str>,
+        metadata: &Metadata,
+    ) -> Result<(), ContextraError> {
+        let metadata_json = serde_json::to_value(metadata).map_err(|e| {
+            ContextraError::StorageError(format!("Failed to serialize metadata: {e}"))
+        })?;
+
+        sqlx::query(
+            r#"
+            INSERT INTO conversations (id, title, metadata)
+            VALUES ($1, $2, $3)
+            ON CONFLICT (id) DO UPDATE
+            SET title = EXCLUDED.title, metadata = EXCLUDED.metadata
+            "#,
+        )
+        .bind(Uuid::from(*id))
+        .bind(title)
+        .bind(metadata_json)
+        .execute(self.pool.inner())
+        .await
+        .map_err(|e| ContextraError::StorageError(format!("Failed to create conversation: {e}")))?;
+
+        Ok(())
+    }
+
+    pub async fn get_conversation(
+        &self,
+        id: &ConversationId,
+    ) -> Result<Option<ConversationRecord>, ContextraError> {
+        #[derive(FromRow)]
+        struct ConvRow {
+            id: Uuid,
+            title: Option<String>,
+            metadata: serde_json::Value,
+        }
+
+        let row = sqlx::query_as::<_, ConvRow>(
+            r#"
+            SELECT id, title, metadata
+            FROM conversations
+            WHERE id = $1
+            "#,
+        )
+        .bind(Uuid::from(*id))
+        .fetch_optional(self.pool.inner())
+        .await
+        .map_err(|e| ContextraError::StorageError(format!("Failed to get conversation: {e}")))?;
+
+        match row {
+            Some(r) => {
+                let metadata = serde_json::from_value(r.metadata).map_err(|e| {
+                    ContextraError::StorageError(format!("Failed to deserialize metadata: {e}"))
+                })?;
+                Ok(Some(ConversationRecord {
+                    id: ConversationId::from(r.id),
+                    title: r.title,
+                    metadata,
+                }))
+            }
+            None => Ok(None),
+        }
+    }
+
+    pub async fn list_conversations(
+        &self,
+        limit: i64,
+        offset: i64,
+    ) -> Result<Vec<ConversationRecord>, ContextraError> {
+        #[derive(FromRow)]
+        struct ConvRow {
+            id: Uuid,
+            title: Option<String>,
+            metadata: serde_json::Value,
+        }
+
+        let rows = sqlx::query_as::<_, ConvRow>(
+            r#"
+            SELECT id, title, metadata
+            FROM conversations
+            ORDER BY id DESC
+            LIMIT $1 OFFSET $2
+            "#,
+        )
+        .bind(limit)
+        .bind(offset)
+        .fetch_all(self.pool.inner())
+        .await
+        .map_err(|e| ContextraError::StorageError(format!("Failed to list conversations: {e}")))?;
+
+        let mut convs = Vec::with_capacity(rows.len());
+        for r in rows {
+            let metadata = serde_json::from_value(r.metadata).map_err(|e| {
+                ContextraError::StorageError(format!("Failed to deserialize metadata: {e}"))
+            })?;
+            convs.push(ConversationRecord {
+                id: ConversationId::from(r.id),
+                title: r.title,
+                metadata,
+            });
+        }
+
+        Ok(convs)
     }
 
     pub async fn get_messages_by_conversation(
