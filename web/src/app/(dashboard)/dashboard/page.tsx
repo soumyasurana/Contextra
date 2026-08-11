@@ -34,6 +34,7 @@ import {
   Cell,
 } from 'recharts';
 import { useAppStore } from '@/lib/store';
+import { GATEWAY_URL } from '@/lib/api';
 
 export default function DashboardPage() {
   const {
@@ -125,7 +126,7 @@ export default function DashboardPage() {
         <div className="p-4 rounded-2xl bg-rose-500/10 border border-rose-500/20 flex items-center space-x-3 text-xs text-rose-300">
           <AlertTriangle className="w-5 h-5 text-rose-400 shrink-0" />
           <div>
-            <p className="font-semibold">Unable to connect to Contextra Backend Gateway (http://localhost:3000)</p>
+            <p className="font-semibold">Unable to connect to Contextra Backend Gateway {GATEWAY_URL}</p>
             <p className="text-rose-400/80 mt-0.5">
               Make sure the Rust gateway service is running. Data below represents local state or 0 values until connected.
             </p>

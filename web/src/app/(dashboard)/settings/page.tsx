@@ -17,6 +17,7 @@ import {
 } from 'lucide-react';
 import { useAppStore } from '@/lib/store';
 import { toast } from 'sonner';
+import { GATEWAY_URL } from '@/lib/api';
 
 export default function SettingsPage() {
   const { settings, updateSettings } = useAppStore();
@@ -167,7 +168,7 @@ export default function SettingsPage() {
                 type="text"
                 value={form.gateway_url}
                 onChange={(e) => setForm({ ...form, gateway_url: e.target.value })}
-                placeholder="http://localhost:3000"
+                placeholder={GATEWAY_URL}
                 className="w-full p-2.5 bg-zinc-900 border border-white/10 rounded-xl text-zinc-100 font-mono text-xs focus:outline-none focus:border-amber-500/50"
               />
             </div>

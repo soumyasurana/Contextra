@@ -23,7 +23,7 @@ export const INITIAL_SETTINGS: SystemSettings = {
   top_p: 0.9,
   max_tokens: 2048,
   enable_reranker: true,
-  gateway_url: 'http://localhost:3000',
+  gateway_url: process.env.NEXT_PUBLIC_GATEWAY_URL || 'https://contextra.blocklogsecurity.com',
   api_key: 'ctx_live_9f830a7b12e34d5e9a8f',
 };
 
