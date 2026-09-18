@@ -4662,8 +4662,15 @@ dependencies = [
  "serde_json",
  "url",
  "utoipa",
+ "utoipa-swagger-ui-vendored",
  "zip",
 ]
+
+[[package]]
+name = "utoipa-swagger-ui-vendored"
+version = "0.1.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "e2eebbbfe4093922c2b6734d7c679ebfebd704a0d7e56dfcb0d05818ce28977d"
 
 [[package]]
 name = "uuid"
@@ -5080,16 +5087,23 @@ name = "worker"
 version = "0.1.0"
 dependencies = [
  "async-trait",
+ "embeddings",
  "errors",
+ "evaluation",
+ "ingestion",
+ "memory",
+ "providers",
  "redis",
  "rstest",
  "serde",
  "serde_json",
+ "storage",
  "telemetry",
  "thiserror 2.0.18",
  "tokio",
  "tokio-util",
  "tracing",
+ "types",
  "uuid",
 ]
 

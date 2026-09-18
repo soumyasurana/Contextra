@@ -246,6 +246,22 @@ Filters should be composable.
 
 ---
 
+# Document Ingestion Request
+
+Creating documents (`POST /api/v1/documents`) accepts the following JSON schema:
+
+```json
+{
+  "source_path": "/path/to/document.md",
+  "collection_id": "018f4a1a-7b3b-7000-8000-000000000001"
+}
+```
+
+- `source_path` (string, required): Path or raw text content of the document to ingest.
+- `collection_id` (string, optional): Target collection UUID. If omitted, a new collection is allocated.
+
+---
+
 # Sorting
 
 Sorting follows a consistent convention.

@@ -215,6 +215,7 @@ impl From<types::Document> for DocumentResource {
 #[derive(Debug, Clone, Deserialize, ToSchema)]
 pub struct CreateDocumentRequest {
     pub source_path: String,
+    pub collection_id: Option<String>,
 }
 
 impl CreateDocumentRequest {

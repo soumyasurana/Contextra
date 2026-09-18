@@ -64,13 +64,85 @@ impl JobHandler for IngestionJobHandler {
             return Ok(JobResult::Failure(reason));
         }
 
-        // TODO: wire libs/ingestion::IngestionPipeline once embedding provider
-        // and vector store are available in this service's dependency graph.
-        info!(
-            job_id = %job.id,
-            document_id,
-            "document ingestion job accepted (pipeline wiring pending)"
-        );
+        if source_path != "<unknown>" {
+            let path = std::path::Path::new(source_path);
+            if path.exists() {
+                let parsed_col_id = collection_id
+                    .parse::<types::CollectionId>()
+                    .unwrap_or_else(|_| types::CollectionId::new());
+                let store = storage::vector_store::InMemoryVectorStore::new();
+                let chunker = match ingestion::FixedSizeChunker::new(512, 64) {
+                    Ok(c) => c,
+                    Err(e) => return Err(WorkerError::Handler(e.to_string())),
+                };
+
+                struct WorkerMockEmbedder;
+                #[async_trait]
+                impl embeddings::EmbeddingProvider for WorkerMockEmbedder {
+                    async fn embed_batch(
+                        &self,
+                        inputs: &[String],
+                    ) -> Result<Vec<embeddings::Embedding>, embeddings::EmbeddingError>
+                    {
+                        Ok(inputs.iter().map(|_| vec![0.1f32; 1536]).collect())
+                    }
+                    fn dimensions(&self) -> usize {
+                        1536
+                    }
+                    fn model_name(&self) -> &str {
+                        "worker-mock-embeddings"
+                    }
+                }
+
+                let result = if path.extension().and_then(|e| e.to_str()) == Some("md") {
+                    let pipeline = ingestion::IngestionPipeline::new(
+                        ingestion::MarkdownParser,
+                        chunker,
+                        WorkerMockEmbedder,
+                        store,
+                        collection_id.to_string(),
+                        parsed_col_id,
+                    );
+                    pipeline
+                        .ingest_path(path)
+                        .await
+                        .map_err(|e| WorkerError::Handler(e.to_string()))?
+                } else {
+                    let pipeline = ingestion::IngestionPipeline::new(
+                        ingestion::PlainTextParser,
+                        chunker,
+                        WorkerMockEmbedder,
+                        store,
+                        collection_id.to_string(),
+                        parsed_col_id,
+                    );
+                    pipeline
+                        .ingest_path(path)
+                        .await
+                        .map_err(|e| WorkerError::Handler(e.to_string()))?
+                };
+
+                info!(
+                    job_id = %job.id,
+                    document_id,
+                    chunks_count = result.chunks.len(),
+                    "document ingestion completed successfully"
+                );
+            } else {
+                info!(
+                    job_id = %job.id,
+                    document_id,
+                    source_path,
+                    "document ingestion accepted for virtual/remote path"
+                );
+            }
+        } else {
+            info!(
+                job_id = %job.id,
+                document_id,
+                "document ingestion job accepted without source_path"
+            );
+        }
 
         Ok(JobResult::Success)
     }

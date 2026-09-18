@@ -147,7 +147,7 @@ async fn test_cli_local_ingest_and_chat_roundtrip() -> Result<(), Box<dyn std::e
     )?;
 
     let engine = LocalEngine::new();
-    let ingest_res = engine.ingest(tmp.path().to_str().unwrap()).await?;
+    let ingest_res = engine.ingest(tmp.path().to_str().unwrap(), None).await?;
     assert!(ingest_res.contains("Document ID:"));
     assert!(ingest_res.contains("Chunks ingested:"));
 
@@ -175,7 +175,7 @@ async fn test_gateway_rest_ingest_and_chat_roundtrip() -> Result<(), Box<dyn std
     let client = GatewayClient::new(base_url, Some("test-token".to_string()));
 
     // 1. Ingest document via REST
-    let doc = client.ingest_document("/tmp/sample_doc.txt").await?;
+    let doc = client.ingest_document("/tmp/sample_doc.txt", None).await?;
     assert!(!doc.id.is_empty());
     assert!(doc.content.contains("/tmp/sample_doc.txt"));
 

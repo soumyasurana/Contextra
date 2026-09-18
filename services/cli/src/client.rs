@@ -97,9 +97,16 @@ impl GatewayClient {
         Ok(page.items)
     }
 
-    pub async fn ingest_document(&self, source_path: &str) -> Result<DocumentResource, String> {
+    pub async fn ingest_document(
+        &self,
+        source_path: &str,
+        collection_id: Option<&str>,
+    ) -> Result<DocumentResource, String> {
         let url = format!("{}/api/v1/documents", self.base_url);
-        let body = serde_json::json!({ "source_path": source_path });
+        let mut body = serde_json::json!({ "source_path": source_path });
+        if let Some(col) = collection_id {
+            body["collection_id"] = serde_json::json!(col);
+        }
         let req = self.apply_auth(self.client.post(&url)).json(&body);
 
         let resp = req

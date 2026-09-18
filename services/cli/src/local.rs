@@ -87,14 +87,17 @@ impl LocalEngine {
         Ok(collections)
     }
 
-    pub async fn ingest(&self, path_str: &str) -> Result<String, String> {
+    pub async fn ingest(&self, path_str: &str, collection: Option<&str>) -> Result<String, String> {
         let path = Path::new(path_str);
         if !path.exists() {
             return Err(format!("File or directory path does not exist: {path_str}"));
         }
 
         let provider = CliEmbeddingProvider;
-        let collection_id = CollectionId::new();
+        let collection_name = collection.unwrap_or("default-collection");
+        let collection_id = collection
+            .and_then(|c| c.parse::<CollectionId>().ok())
+            .unwrap_or_default();
 
         let result = if path.extension().and_then(|e| e.to_str()) == Some("md") {
             let pipeline = IngestionPipeline::new(
@@ -102,7 +105,7 @@ impl LocalEngine {
                 FixedSizeChunker::new(512, 64).map_err(|e| e.to_string())?,
                 provider,
                 self.vector_store.clone(),
-                "default-collection",
+                collection_name,
                 collection_id,
             );
             pipeline
@@ -115,7 +118,7 @@ impl LocalEngine {
                 FixedSizeChunker::new(512, 64).map_err(|e| e.to_string())?,
                 provider,
                 self.vector_store.clone(),
-                "default-collection",
+                collection_name,
                 collection_id,
             );
             pipeline

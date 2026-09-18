@@ -193,7 +193,11 @@ impl GatewayService for ProductionGatewayService {
         request: CreateDocumentRequest,
     ) -> Result<DocumentResource, ContextraError> {
         let path = Path::new(&request.source_path);
-        let collection_id = CollectionId::new();
+        let collection_id = request
+            .collection_id
+            .as_deref()
+            .and_then(|s| s.parse::<CollectionId>().ok())
+            .unwrap_or_default();
 
         let chunker = FixedSizeChunker::new(512, 64)?;
         let result = if path.extension().and_then(|e| e.to_str()) == Some("md") {
@@ -381,7 +385,7 @@ impl GatewayService for ProductionGatewayService {
             })
             .collect();
 
-        let has_more = offset + items.len() < total_count as usize;
+        let has_more = offset + limit < total_count as usize;
         let next_cursor = if has_more {
             Some(Cursor((offset + limit).to_string()))
         } else {

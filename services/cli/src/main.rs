@@ -110,9 +110,10 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     match cli.command {
         Commands::Ingest(args) => {
             println!("Ingesting document at: {}", args.path);
+            let collection = args.collection.as_deref();
             if cli.local {
                 let engine = LocalEngine::new();
-                match engine.ingest(&args.path).await {
+                match engine.ingest(&args.path, collection).await {
                     Ok(result) => {
                         println!("Ingestion completed successfully (local mode):");
                         println!("{result}");
@@ -121,7 +122,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                 }
             } else {
                 let client = GatewayClient::new(&cli.gateway_url, cli.auth_token.clone());
-                match client.ingest_document(&args.path).await {
+                match client.ingest_document(&args.path, collection).await {
                     Ok(doc) => {
                         println!("Ingestion submitted successfully to Gateway:");
                         println!("Document ID:    {}", doc.id);
@@ -131,7 +132,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                         eprintln!("REST request failed: {e}");
                         eprintln!("Falling back to local ingestion mode...");
                         let engine = LocalEngine::new();
-                        match engine.ingest(&args.path).await {
+                        match engine.ingest(&args.path, collection).await {
                             Ok(res) => println!("{res}"),
                             Err(err) => eprintln!("Local ingestion failed: {err}"),
                         }

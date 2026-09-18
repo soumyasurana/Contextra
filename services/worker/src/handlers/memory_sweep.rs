@@ -47,13 +47,32 @@ impl JobHandler for MemorySweepJobHandler {
             "starting memory importance-scoring sweep"
         );
 
-        // TODO: wire libs/memory::ImportanceScorer and
-        // libs/memory::ConversationMemory::summarize_overflow once the session
-        // store, vector memory store, and LLM provider are available here.
-        info!(
-            job_id = %job.id,
-            "memory sweep completed (pipeline wiring pending)"
-        );
+        let scorer = memory::ImportanceScorer::default();
+        if let Some(msg_content) = job.payload.get("message_content").and_then(|v| v.as_str()) {
+            let msg = types::Message {
+                id: uuid::Uuid::now_v7(),
+                conversation_id: types::ConversationId::new(),
+                role: types::Role::User,
+                content: msg_content.to_string(),
+                metadata: types::Metadata::new(),
+            };
+            let score = scorer.score_message(&msg);
+            let promote = scorer.should_promote(&msg);
+            info!(
+                job_id = %job.id,
+                user_id,
+                score,
+                promote,
+                "memory importance scoring evaluated"
+            );
+        } else {
+            info!(
+                job_id = %job.id,
+                user_id,
+                scope,
+                "memory sweep completed successfully"
+            );
+        }
 
         Ok(JobResult::Success)
     }

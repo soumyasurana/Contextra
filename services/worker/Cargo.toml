@@ -7,15 +7,22 @@ authors.workspace = true
 
 [dependencies]
 async-trait = "0.1"
+embeddings = { path = "../../libs/embeddings" }
 errors = { path = "../../libs/errors" }
+evaluation = { path = "../../libs/evaluation" }
+ingestion = { path = "../../libs/ingestion" }
+memory = { path = "../../libs/memory" }
+providers = { path = "../../libs/providers" }
 redis = { version = "0.25", features = ["aio", "tokio-comp"] }
 serde = { workspace = true }
 serde_json = { workspace = true }
+storage = { path = "../../libs/storage" }
 telemetry = { path = "../../libs/telemetry" }
 thiserror = { workspace = true }
 tokio = { version = "1", features = ["full"] }
 tokio-util = { version = "0.7", features = ["rt"] }
 tracing = "0.1"
+types = { path = "../../libs/types" }
 uuid = { workspace = true }
 
 [dev-dependencies]
