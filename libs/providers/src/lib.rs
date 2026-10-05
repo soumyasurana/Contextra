@@ -24,7 +24,6 @@ const DEFAULT_MAX_BACKOFF: Duration = Duration::from_secs(4);
 
 pub type ChatStream = Pin<Box<dyn Stream<Item = Result<ChatChunk, ProviderError>> + Send>>;
 
-#[allow(clippy::double_must_use)]
 #[async_trait]
 pub trait LLMProvider: Send + Sync {
     async fn chat(&self, request: ChatRequest) -> Result<ChatResponse, ProviderError>;
