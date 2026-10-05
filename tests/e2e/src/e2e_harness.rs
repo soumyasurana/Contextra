@@ -13,12 +13,11 @@ pub async fn spawn_test_gateway(service: Arc<dyn GatewayService>) -> String {
     let addr = listener.local_addr().expect("failed to get local addr");
 
     tokio::spawn(async move {
-        axum::serve(
+        let _ = axum::serve(
             listener,
             app.into_make_service_with_connect_info::<SocketAddr>(),
         )
-        .await
-        .expect("test gateway server crashed");
+        .await;
     });
 
     format!("http://{addr}")

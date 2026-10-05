@@ -5,7 +5,10 @@ import {
   ChatMessage,
 } from '@/types';
 
-export const GATEWAY_URL = process.env.NEXT_PUBLIC_GATEWAY_URL || 'https://contextra.blocklogsecurity.com';
+export const DEFAULT_GATEWAY_URL = process.env.NEXT_PUBLIC_GATEWAY_URL || 'https://contextra.blocklogsecurity.com';
+
+/** Kept for backwards-compat with components that read the env URL for display */
+export const GATEWAY_URL = DEFAULT_GATEWAY_URL;
 
 async function fetchWithTimeout(url: string, options: RequestInit = {}, timeoutMs = 5000) {
   const controller = new AbortController();
@@ -131,9 +134,10 @@ function mapMessage(msg: BackendMessageResource): ChatMessage {
 
 export const api = {
   // ─── Documents ───────────────────────────────────────────────────
-  async getDocuments(apiKey: string): Promise<{ items: DocumentResource[]; totalCount: number }> {
+  async getDocuments(apiKey: string, gatewayUrl?: string): Promise<{ items: DocumentResource[]; totalCount: number }> {
+    const base = gatewayUrl || DEFAULT_GATEWAY_URL;
     try {
-      const res = await fetchWithTimeout(`${GATEWAY_URL}/api/v1/documents`, {
+      const res = await fetchWithTimeout(`${base}/api/v1/documents`, {
         headers: authHeaders(apiKey),
       });
       if (!res.ok) throw new Error(`API ${res.status}`);
@@ -147,9 +151,10 @@ export const api = {
     }
   },
 
-  async createDocument(sourcePath: string, apiKey: string): Promise<DocumentResource | null> {
+  async createDocument(sourcePath: string, apiKey: string, gatewayUrl?: string): Promise<DocumentResource | null> {
+    const base = gatewayUrl || DEFAULT_GATEWAY_URL;
     try {
-      const res = await fetchWithTimeout(`${GATEWAY_URL}/api/v1/documents`, {
+      const res = await fetchWithTimeout(`${base}/api/v1/documents`, {
         method: 'POST',
         headers: authHeaders(apiKey),
         body: JSON.stringify({ source_path: sourcePath }),
@@ -162,10 +167,24 @@ export const api = {
     }
   },
 
-  // ─── Collections ─────────────────────────────────────────────────
-  async getCollections(apiKey: string): Promise<{ items: CollectionResource[]; totalCount: number }> {
+  async deleteDocument(id: string, apiKey: string, gatewayUrl?: string): Promise<boolean> {
+    const base = gatewayUrl || DEFAULT_GATEWAY_URL;
     try {
-      const res = await fetchWithTimeout(`${GATEWAY_URL}/api/v1/collections`, {
+      const res = await fetchWithTimeout(`${base}/api/v1/documents/${id}`, {
+        method: 'DELETE',
+        headers: authHeaders(apiKey),
+      });
+      return res.ok || res.status === 404;
+    } catch {
+      return false;
+    }
+  },
+
+  // ─── Collections ─────────────────────────────────────────────────
+  async getCollections(apiKey: string, gatewayUrl?: string): Promise<{ items: CollectionResource[]; totalCount: number }> {
+    const base = gatewayUrl || DEFAULT_GATEWAY_URL;
+    try {
+      const res = await fetchWithTimeout(`${base}/api/v1/collections`, {
         headers: authHeaders(apiKey),
       });
       if (!res.ok) throw new Error(`API ${res.status}`);
@@ -179,9 +198,10 @@ export const api = {
     }
   },
 
-  async createCollection(name: string, metadata: Record<string, unknown> = {}, apiKey: string): Promise<CollectionResource | null> {
+  async createCollection(name: string, metadata: Record<string, unknown> = {}, apiKey: string, gatewayUrl?: string): Promise<CollectionResource | null> {
+    const base = gatewayUrl || DEFAULT_GATEWAY_URL;
     try {
-      const res = await fetchWithTimeout(`${GATEWAY_URL}/api/v1/collections`, {
+      const res = await fetchWithTimeout(`${base}/api/v1/collections`, {
         method: 'POST',
         headers: authHeaders(apiKey),
         body: JSON.stringify({ name, metadata }),
@@ -194,10 +214,24 @@ export const api = {
     }
   },
 
-  // ─── Conversations ───────────────────────────────────────────────
-  async getConversations(apiKey: string): Promise<{ items: ConversationResource[]; totalCount: number }> {
+  async deleteCollection(id: string, apiKey: string, gatewayUrl?: string): Promise<boolean> {
+    const base = gatewayUrl || DEFAULT_GATEWAY_URL;
     try {
-      const res = await fetchWithTimeout(`${GATEWAY_URL}/api/v1/conversations`, {
+      const res = await fetchWithTimeout(`${base}/api/v1/collections/${id}`, {
+        method: 'DELETE',
+        headers: authHeaders(apiKey),
+      });
+      return res.ok || res.status === 404;
+    } catch {
+      return false;
+    }
+  },
+
+  // ─── Conversations ───────────────────────────────────────────────
+  async getConversations(apiKey: string, gatewayUrl?: string): Promise<{ items: ConversationResource[]; totalCount: number }> {
+    const base = gatewayUrl || DEFAULT_GATEWAY_URL;
+    try {
+      const res = await fetchWithTimeout(`${base}/api/v1/conversations`, {
         headers: authHeaders(apiKey),
       });
       if (!res.ok) throw new Error(`API ${res.status}`);
@@ -211,9 +245,10 @@ export const api = {
     }
   },
 
-  async createConversation(title: string | undefined, apiKey: string): Promise<ConversationResource | null> {
+  async createConversation(title: string | undefined, apiKey: string, gatewayUrl?: string): Promise<ConversationResource | null> {
+    const base = gatewayUrl || DEFAULT_GATEWAY_URL;
     try {
-      const res = await fetchWithTimeout(`${GATEWAY_URL}/api/v1/conversations`, {
+      const res = await fetchWithTimeout(`${base}/api/v1/conversations`, {
         method: 'POST',
         headers: authHeaders(apiKey),
         body: JSON.stringify({ title }),
@@ -227,10 +262,11 @@ export const api = {
   },
 
   // ─── Messages ────────────────────────────────────────────────────
-  async getMessages(conversationId: string, apiKey: string): Promise<ChatMessage[]> {
+  async getMessages(conversationId: string, apiKey: string, gatewayUrl?: string): Promise<ChatMessage[]> {
+    const base = gatewayUrl || DEFAULT_GATEWAY_URL;
     try {
       const res = await fetchWithTimeout(
-        `${GATEWAY_URL}/api/v1/conversations/${conversationId}/messages`,
+        `${base}/api/v1/conversations/${conversationId}/messages`,
         { headers: authHeaders(apiKey) },
       );
       if (!res.ok) throw new Error(`API ${res.status}`);
@@ -241,10 +277,11 @@ export const api = {
     }
   },
 
-  async sendMessage(conversationId: string, message: string, apiKey: string): Promise<ChatMessage | null> {
+  async sendMessage(conversationId: string, message: string, apiKey: string, gatewayUrl?: string): Promise<ChatMessage | null> {
+    const base = gatewayUrl || DEFAULT_GATEWAY_URL;
     try {
       const res = await fetchWithTimeout(
-        `${GATEWAY_URL}/api/v1/conversations/${conversationId}/messages`,
+        `${base}/api/v1/conversations/${conversationId}/messages`,
         {
           method: 'POST',
           headers: authHeaders(apiKey),
@@ -266,10 +303,11 @@ export const api = {
   },
 
   // ─── Health ──────────────────────────────────────────────────────
-  async checkHealth(apiKey: string): Promise<boolean> {
+  async checkHealth(apiKey: string, gatewayUrl?: string): Promise<boolean> {
+    const base = gatewayUrl || DEFAULT_GATEWAY_URL;
     try {
       const res = await fetchWithTimeout(
-        `${GATEWAY_URL}/api/v1/collections?limit=1`,
+        `${base}/api/v1/collections?limit=1`,
         { headers: authHeaders(apiKey) },
         2000,
       );

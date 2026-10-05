@@ -102,13 +102,16 @@ export const useAppStore = create<AppState>((set, get) => ({
     })),
   fetchDocuments: async () => {
     set({ documentsLoading: true });
-    const { settings } = get();
-    const result = await api.getDocuments(settings.api_key);
-    set({
-      documents: result.items,
-      documentsCount: result.totalCount,
-      documentsLoading: false,
-    });
+    try {
+      const { settings } = get();
+      const result = await api.getDocuments(settings.api_key);
+      set({
+        documents: result.items,
+        documentsCount: result.totalCount,
+      });
+    } finally {
+      set({ documentsLoading: false });
+    }
   },
 
   // Collections — start empty, fetch from API
@@ -133,13 +136,16 @@ export const useAppStore = create<AppState>((set, get) => ({
     })),
   fetchCollections: async () => {
     set({ collectionsLoading: true });
-    const { settings } = get();
-    const result = await api.getCollections(settings.api_key);
-    set({
-      collections: result.items,
-      collectionsCount: result.totalCount,
-      collectionsLoading: false,
-    });
+    try {
+      const { settings } = get();
+      const result = await api.getCollections(settings.api_key);
+      set({
+        collections: result.items,
+        collectionsCount: result.totalCount,
+      });
+    } finally {
+      set({ collectionsLoading: false });
+    }
   },
 
   // Chat
@@ -161,22 +167,26 @@ export const useAppStore = create<AppState>((set, get) => ({
   setStreaming: (streaming) => set({ isStreaming: streaming }),
   fetchConversations: async () => {
     set({ conversationsLoading: true });
-    const { settings } = get();
-    const result = await api.getConversations(settings.api_key);
-    set({
-      conversations: result.items,
-      conversationsCount: result.totalCount,
-      conversationsLoading: false,
-    });
+    try {
+      const { settings } = get();
+      const result = await api.getConversations(settings.api_key);
+      set({
+        conversations: result.items,
+        conversationsCount: result.totalCount,
+      });
+    } finally {
+      set({ conversationsLoading: false });
+    }
   },
   fetchMessages: async (conversationId: string) => {
     set({ messagesLoading: true });
-    const { settings } = get();
-    const msgs = await api.getMessages(conversationId, settings.api_key);
-    set({
-      messages: msgs,
-      messagesLoading: false,
-    });
+    try {
+      const { settings } = get();
+      const msgs = await api.getMessages(conversationId, settings.api_key);
+      set({ messages: msgs });
+    } finally {
+      set({ messagesLoading: false });
+    }
   },
 
   // Prompts — no backend endpoint, keep mock data
