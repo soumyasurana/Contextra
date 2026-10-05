@@ -6,6 +6,7 @@ use std::sync::Arc;
 use std::time::Duration;
 use tokio::sync::Mutex;
 
+#[allow(clippy::double_must_use)]
 #[async_trait]
 pub trait Cache: Send + Sync {
     async fn get<T>(&self, key: &str) -> Result<Option<T>, ContextraError>

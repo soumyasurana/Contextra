@@ -16,6 +16,7 @@ pub struct ApiKeyRecord {
     pub scopes: Vec<String>,
 }
 
+#[allow(clippy::double_must_use)]
 #[async_trait]
 pub trait ApiKeyStore: Send + Sync {
     async fn find_by_key_id(&self, key_id: &str) -> Result<Option<ApiKeyRecord>, ContextraError>;
