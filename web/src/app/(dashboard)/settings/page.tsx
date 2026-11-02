@@ -17,7 +17,7 @@ import {
 } from 'lucide-react';
 import { useAppStore } from '@/lib/store';
 import { toast } from 'sonner';
-import { GATEWAY_URL } from '@/lib/api';
+import { SystemSettings } from '@/types';
 
 export default function SettingsPage() {
   const { settings, updateSettings } = useAppStore();
@@ -55,7 +55,7 @@ export default function SettingsPage() {
               <label className="block text-zinc-300 font-semibold mb-1">LLM Provider</label>
               <select
                 value={form.llm_provider}
-                onChange={(e) => setForm({ ...form, llm_provider: e.target.value as any })}
+                onChange={(e) => setForm({ ...form, llm_provider: e.target.value as SystemSettings['llm_provider'] })}
                 className="w-full p-2.5 bg-zinc-900 border border-white/10 rounded-xl text-zinc-100 focus:outline-none focus:border-indigo-500/50"
               >
                 <option value="openai">OpenAI (GPT-4o / GPT-4o-mini)</option>
@@ -69,7 +69,7 @@ export default function SettingsPage() {
               <label className="block text-zinc-300 font-semibold mb-1">Embedding Provider</label>
               <select
                 value={form.embedding_provider}
-                onChange={(e) => setForm({ ...form, embedding_provider: e.target.value as any })}
+                onChange={(e) => setForm({ ...form, embedding_provider: e.target.value as SystemSettings['embedding_provider'] })}
                 className="w-full p-2.5 bg-zinc-900 border border-white/10 rounded-xl text-zinc-100 focus:outline-none focus:border-indigo-500/50"
               >
                 <option value="openai">OpenAI (text-embedding-3-small)</option>

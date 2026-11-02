@@ -104,7 +104,7 @@ export const useAppStore = create<AppState>((set, get) => ({
     set({ documentsLoading: true });
     try {
       const { settings } = get();
-      const result = await api.getDocuments(settings.api_key);
+      const result = await api.getDocuments(settings.api_key, settings.gateway_url);
       set({
         documents: result.items,
         documentsCount: result.totalCount,
@@ -138,7 +138,7 @@ export const useAppStore = create<AppState>((set, get) => ({
     set({ collectionsLoading: true });
     try {
       const { settings } = get();
-      const result = await api.getCollections(settings.api_key);
+      const result = await api.getCollections(settings.api_key, settings.gateway_url);
       set({
         collections: result.items,
         collectionsCount: result.totalCount,
@@ -169,7 +169,7 @@ export const useAppStore = create<AppState>((set, get) => ({
     set({ conversationsLoading: true });
     try {
       const { settings } = get();
-      const result = await api.getConversations(settings.api_key);
+      const result = await api.getConversations(settings.api_key, settings.gateway_url);
       set({
         conversations: result.items,
         conversationsCount: result.totalCount,
@@ -182,7 +182,7 @@ export const useAppStore = create<AppState>((set, get) => ({
     set({ messagesLoading: true });
     try {
       const { settings } = get();
-      const msgs = await api.getMessages(conversationId, settings.api_key);
+      const msgs = await api.getMessages(conversationId, settings.api_key, settings.gateway_url);
       set({ messages: msgs });
     } finally {
       set({ messagesLoading: false });
@@ -221,14 +221,14 @@ export const useAppStore = create<AppState>((set, get) => ({
   // Aggregated dashboard fetch — hits all three list endpoints
   fetchDashboardData: async () => {
     const store = get();
-    const apiKey = store.settings.api_key;
+    const { api_key: apiKey, gateway_url: gatewayUrl } = store.settings;
 
     // Fire all fetches in parallel
     const [docsResult, colsResult, convsResult, health] = await Promise.all([
-      api.getDocuments(apiKey),
-      api.getCollections(apiKey),
-      api.getConversations(apiKey),
-      api.checkHealth(apiKey),
+      api.getDocuments(apiKey, gatewayUrl),
+      api.getCollections(apiKey, gatewayUrl),
+      api.getConversations(apiKey, gatewayUrl),
+      api.checkHealth(apiKey, gatewayUrl),
     ]);
 
     set({
@@ -245,7 +245,7 @@ export const useAppStore = create<AppState>((set, get) => ({
   // Health check
   checkApiHealth: async () => {
     const { settings } = get();
-    const healthy = await api.checkHealth(settings.api_key);
+    const healthy = await api.checkHealth(settings.api_key, settings.gateway_url);
     set({ apiConnected: healthy });
   },
 }));

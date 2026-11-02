@@ -14,7 +14,7 @@ import {
   X,
 } from 'lucide-react';
 import { useAppStore } from '@/lib/store';
-import { ChatMessage } from '@/types';
+import { ChatMessage, SystemSettings } from '@/types';
 import { api } from '@/lib/api';
 import { toast } from 'sonner';
 
@@ -59,13 +59,17 @@ export default function ChatPage() {
     let convId = activeConversationId;
     if (!convId) {
       // Auto-create conversation if none active
-      const created = await api.createConversation('Interactive Chat', settings.api_key);
+      const created = await api.createConversation(
+        'Interactive Chat',
+        settings.api_key,
+        settings.gateway_url,
+      );
       if (created) {
         convId = created.id;
         setActiveConversationId(convId);
       } else {
-        convId = `conv_${Date.now()}`;
-        setActiveConversationId(convId);
+        toast.error('Unable to create a conversation. Check the gateway connection and try again.');
+        return;
       }
     }
 
@@ -83,21 +87,16 @@ export default function ChatPage() {
     setIsStreaming(true);
 
     try {
-      const response = await api.sendMessage(convId, userQuery, settings.api_key);
+      const response = await api.sendMessage(
+        convId,
+        userQuery,
+        settings.api_key,
+        settings.gateway_url,
+      );
       if (response) {
         addChatMessage(response);
       } else {
-        // Fallback response if gateway chat endpoint returns null or 404
-        const fallbackAssistantMsg: ChatMessage = {
-          id: `msg_ans_${Date.now()}`,
-          conversation_id: convId,
-          role: 'assistant',
-          content: `Backend received message: "${userQuery}". Contextra gateway execution complete.`,
-          timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
-          latency_ms: 120,
-          tokens_used: 150,
-        };
-        addChatMessage(fallbackAssistantMsg);
+        toast.error('The gateway could not complete the message. Please try again.');
       }
     } catch {
       toast.error('Failed to communicate with backend gateway');
@@ -286,7 +285,7 @@ export default function ChatPage() {
                   <label className="block text-zinc-400 mb-1">LLM Provider</label>
                   <select
                     value={settings.llm_provider}
-                    onChange={(e) => updateSettings({ llm_provider: e.target.value as any })}
+                    onChange={(e) => updateSettings({ llm_provider: e.target.value as SystemSettings['llm_provider'] })}
                     className="w-full p-2 bg-zinc-900 border border-white/10 rounded-xl text-zinc-200"
                   >
                     <option value="openai">OpenAI</option>
