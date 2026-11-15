@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useState } from 'react';
+import React, { useState, useRef, useEffect } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import {
   GitMerge,
@@ -22,6 +22,14 @@ export default function RetrievalPage() {
   const [testQuery, setTestQuery] = useState('How does Reciprocal Rank Fusion calculate vector scores?');
   const [isRunning, setIsRunning] = useState(false);
   const [activeStep, setActiveStep] = useState<number>(4); // default finished step
+  const intervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
+
+  // Clean up the simulation interval on unmount
+  useEffect(() => {
+    return () => {
+      if (intervalRef.current !== null) clearInterval(intervalRef.current);
+    };
+  }, []);
 
   const steps: RetrievalStepInfo[] = [
     {
@@ -103,10 +111,11 @@ export default function RetrievalPage() {
     setIsRunning(true);
     setActiveStep(0);
 
-    const interval = setInterval(() => {
+    intervalRef.current = setInterval(() => {
       setActiveStep((prev) => {
         if (prev >= steps.length - 1) {
-          clearInterval(interval);
+          if (intervalRef.current !== null) clearInterval(intervalRef.current);
+          intervalRef.current = null;
           setIsRunning(false);
           return steps.length - 1;
         }

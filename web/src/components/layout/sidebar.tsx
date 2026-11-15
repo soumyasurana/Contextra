@@ -99,9 +99,9 @@ export function Sidebar() {
               <Zap className="w-3.5 h-3.5 text-amber-400" />
               <span>Rust Core Backend</span>
             </span>
-            <span className="flex items-center space-x-1 text-emerald-400 text-[11px]">
-              <span className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse" />
-              <span>Online</span>
+            <span className={`flex items-center space-x-1 text-[11px] ${apiConnected ? 'text-emerald-400' : 'text-rose-400'}`}>
+              <span className={`w-2 h-2 rounded-full ${apiConnected ? 'bg-emerald-500 animate-pulse' : 'bg-rose-500'}`} />
+              <span>{apiConnected ? 'Online' : 'Offline'}</span>
             </span>
           </div>
 

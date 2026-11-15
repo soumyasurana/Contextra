@@ -216,9 +216,14 @@ export default function DocumentsPage() {
                         <Eye className="w-4 h-4" />
                       </button>
                       <button
-                        onClick={() => {
-                          deleteDocument(doc.id);
-                          toast.success(`Removed ${doc.name}`);
+                        onClick={async () => {
+                          const ok = await api.deleteDocument(doc.id, settings.api_key, settings.gateway_url);
+                          if (ok) {
+                            deleteDocument(doc.id);
+                            toast.success(`Removed ${doc.name}`);
+                          } else {
+                            toast.error(`Failed to delete ${doc.name}`);
+                          }
                         }}
                         className="p-1.5 rounded-lg bg-zinc-800 hover:bg-rose-900/50 text-zinc-400 hover:text-rose-300 transition-colors"
                         title="Delete Document"

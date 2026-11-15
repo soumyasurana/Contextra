@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import {
   Search,
   Bell,
@@ -23,12 +23,32 @@ function GithubIcon(props: React.SVGProps<SVGSVGElement>) {
 export function TopNavbar() {
   const { setCommandPaletteOpen, settings, apiConnected, checkApiHealth } = useAppStore();
   const [notificationsOpen, setNotificationsOpen] = useState(false);
+  const [hasUnread, setHasUnread] = useState(true);
+  const notifRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
     checkApiHealth();
     const interval = setInterval(checkApiHealth, 15000);
     return () => clearInterval(interval);
   }, [checkApiHealth]);
+
+  // Close notifications dropdown when clicking outside
+  useEffect(() => {
+    if (!notificationsOpen) return;
+    const handleClickOutside = (e: MouseEvent) => {
+      if (notifRef.current && !notifRef.current.contains(e.target as Node)) {
+        setNotificationsOpen(false);
+      }
+    };
+    document.addEventListener('mousedown', handleClickOutside);
+    return () => document.removeEventListener('mousedown', handleClickOutside);
+  }, [notificationsOpen]);
+
+  const handleToggleNotifications = () => {
+    setNotificationsOpen((prev) => !prev);
+    // Mark as read when opened
+    if (!notificationsOpen) setHasUnread(false);
+  };
 
   const notifications = [
     { id: 1, title: 'Eval Suite Passed', time: '10m ago', unread: true },
@@ -85,13 +105,13 @@ export function TopNavbar() {
         </a>
 
         {/* Notifications Dropdown */}
-        <div className="relative">
+        <div className="relative" ref={notifRef}>
           <button
-            onClick={() => setNotificationsOpen(!notificationsOpen)}
+            onClick={handleToggleNotifications}
             className="p-2 rounded-xl text-zinc-400 hover:text-white hover:bg-white/5 border border-transparent hover:border-white/10 transition-all relative"
           >
             <Bell className="w-4 h-4" />
-            <span className="absolute top-1.5 right-1.5 w-2 h-2 rounded-full bg-indigo-500" />
+            {hasUnread && <span className="absolute top-1.5 right-1.5 w-2 h-2 rounded-full bg-indigo-500" />}
           </button>
 
           {notificationsOpen && (

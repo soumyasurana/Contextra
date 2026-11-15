@@ -168,7 +168,7 @@ async fn test_cli_local_eval_run() -> Result<(), Box<dyn std::error::Error>> {
     Ok(())
 }
 
-#[tokio::test]
+#[tokio::test(flavor = "multi_thread")]
 async fn test_gateway_rest_ingest_and_chat_roundtrip() -> Result<(), Box<dyn std::error::Error>> {
     let service = Arc::new(MockE2eGatewayService::default());
     let base_url = spawn_test_gateway(service).await;

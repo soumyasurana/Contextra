@@ -174,9 +174,14 @@ export default function CollectionsPage() {
                       <Edit2 className="w-3.5 h-3.5" />
                     </button>
                     <button
-                      onClick={() => {
-                        deleteCollection(col.id);
-                        toast.success(`Deleted collection "${col.name}"`);
+                      onClick={async () => {
+                        const ok = await api.deleteCollection(col.id, settings.api_key, settings.gateway_url);
+                        if (ok) {
+                          deleteCollection(col.id);
+                          toast.success(`Deleted collection "${col.name}"`);
+                        } else {
+                          toast.error(`Failed to delete collection "${col.name}"`);
+                        }
                       }}
                       className="p-1.5 rounded-lg text-zinc-400 hover:text-rose-400 hover:bg-rose-900/40"
                       title="Delete"

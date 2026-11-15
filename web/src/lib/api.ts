@@ -252,7 +252,7 @@ export const api = {
         method: 'POST',
         headers: authHeaders(apiKey),
         body: JSON.stringify({ title }),
-      });
+      }, 15000);
       if (!res.ok) throw new Error('Failed to create conversation');
       const data: BackendConversationResource = await res.json();
       return mapConversation(data);
@@ -287,6 +287,7 @@ export const api = {
           headers: authHeaders(apiKey),
           body: JSON.stringify({ message }),
         },
+        30000,
       );
       if (!res.ok) throw new Error('Failed to send message');
       const data: BackendChatExecutionResponse = await res.json();

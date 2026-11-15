@@ -15,6 +15,7 @@ import {
   BarChart,
   Layers,
   Sparkles,
+  Loader2,
 } from 'lucide-react';
 import {
   BarChart as ReBarChart,
@@ -86,7 +87,7 @@ export default function EvaluationPage() {
           disabled={isRunning}
           className="px-5 py-2.5 rounded-xl bg-gradient-to-r from-pink-600 to-rose-600 hover:from-pink-500 hover:to-rose-500 text-white font-medium text-sm flex items-center justify-center space-x-2 shadow-lg shadow-pink-500/25 transition-all"
         >
-          <Play className={`w-4 h-4 fill-current ${isRunning ? 'animate-spin' : ''}`} />
+          {isRunning ? <Loader2 className="w-4 h-4 animate-spin" /> : <Play className="w-4 h-4 fill-current" />}
           <span>{isRunning ? 'Running Benchmark...' : 'Run New Evaluation'}</span>
         </button>
       </div>

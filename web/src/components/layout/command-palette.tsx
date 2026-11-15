@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useState, useRef } from 'react';
 import { useRouter } from 'next/navigation';
 import { useAppStore } from '@/lib/store';
 import {
@@ -25,20 +25,23 @@ export function CommandPalette() {
   const router = useRouter();
   const { commandPaletteOpen, setCommandPaletteOpen, documents, collections } = useAppStore();
   const [query, setQuery] = useState('');
+  // Keep a ref to the current open state so the keydown handler doesn't go stale
+  const openRef = useRef(commandPaletteOpen);
+  useEffect(() => { openRef.current = commandPaletteOpen; }, [commandPaletteOpen]);
 
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
       if ((e.metaKey || e.ctrlKey) && e.key === 'k') {
         e.preventDefault();
-        setCommandPaletteOpen(!commandPaletteOpen);
+        setCommandPaletteOpen(!openRef.current);
       }
-      if (e.key === 'Escape' && commandPaletteOpen) {
+      if (e.key === 'Escape') {
         setCommandPaletteOpen(false);
       }
     };
     window.addEventListener('keydown', handleKeyDown);
     return () => window.removeEventListener('keydown', handleKeyDown);
-  }, [commandPaletteOpen, setCommandPaletteOpen]);
+  }, [setCommandPaletteOpen]);
 
   const navItems = [
     { name: 'Dashboard', icon: LayoutDashboard, path: '/dashboard', cat: 'Navigation' },
