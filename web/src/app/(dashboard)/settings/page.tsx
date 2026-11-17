@@ -159,7 +159,7 @@ export default function SettingsPage() {
         <div className="glass-panel rounded-2xl p-6 space-y-4">
           <h2 className="text-base font-bold text-white flex items-center space-x-2 border-b border-white/10 pb-3">
             <Key className="w-5 h-5 text-amber-400" />
-            <span>API Keys & Gateway REST Endpoint</span>
+            <span>Gateway REST Endpoint & Credentials</span>
           </h2>
 
           <div className="space-y-4 text-xs">
@@ -175,13 +175,22 @@ export default function SettingsPage() {
             </div>
 
             <div>
-              <label className="block text-zinc-300 font-semibold mb-1">Contextra Platform API Key</label>
+              <div className="flex items-center justify-between mb-1">
+                <label className="block text-zinc-300 font-semibold">Contextra Platform API Key</label>
+                <span className="text-[10px] text-emerald-400 bg-emerald-500/10 border border-emerald-500/20 px-2 py-0.5 rounded-full">
+                  Open Access Active (Optional)
+                </span>
+              </div>
               <input
                 type="password"
                 value={form.api_key}
                 onChange={(e) => setForm({ ...form, api_key: e.target.value })}
+                placeholder="Not required — Open Access enabled"
                 className="w-full p-2.5 bg-zinc-900 border border-white/10 rounded-xl text-zinc-100 font-mono text-xs focus:outline-none focus:border-amber-500/50"
               />
+              <p className="mt-1 text-[11px] text-zinc-500">
+                Authentication requirement has been removed. All gateway APIs are directly accessible without a key.
+              </p>
             </div>
           </div>
         </div>

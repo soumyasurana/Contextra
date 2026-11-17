@@ -62,36 +62,36 @@ impl FromRef<AppState> for Arc<dyn GatewayService> {
 }
 
 pub fn build_router(state: AppState) -> Router {
-    Router::new()
-        .nest(
-            "/api/v1",
-            Router::new()
-                .route("/documents", get(list_documents).post(create_document))
-                .route("/documents/:document_id", get(get_document))
-                .route(
-                    "/collections",
-                    get(list_collections).post(create_collection),
-                )
-                .route("/collections/:collection_id", get(get_collection))
-                .route(
-                    "/conversations",
-                    get(list_conversations).post(create_conversation),
-                )
-                .route(
-                    "/conversations/:conversation_id/messages",
-                    get(list_messages).post(execute_chat),
-                )
-                .route(
-                    "/conversations/:conversation_id/messages/stream",
-                    post(stream_chat),
-                ),
+    let protected_api = Router::new()
+        .route("/documents", get(list_documents).post(create_document))
+        .route("/documents/:document_id", get(get_document))
+        .route(
+            "/collections",
+            get(list_collections).post(create_collection),
         )
-        .merge(SwaggerUi::new("/docs").url("/api-docs/openapi.json", ApiDoc::openapi()))
-        .layer(middleware::from_fn(request_id_middleware))
-        .layer(middleware::from_fn_with_state(
+        .route("/collections/:collection_id", get(get_collection))
+        .route(
+            "/conversations",
+            get(list_conversations).post(create_conversation),
+        )
+        .route(
+            "/conversations/:conversation_id/messages",
+            get(list_messages).post(execute_chat),
+        )
+        .route(
+            "/conversations/:conversation_id/messages/stream",
+            post(stream_chat),
+        )
+        .route_layer(middleware::from_fn_with_state(
             state.clone(),
             auth_middleware,
-        ))
+        ));
+
+    Router::new()
+        .route("/health", get(health_check))
+        .nest("/api/v1", protected_api)
+        .merge(SwaggerUi::new("/docs").url("/api-docs/openapi.json", ApiDoc::openapi()))
+        .layer(middleware::from_fn(request_id_middleware))
         .layer(middleware::from_fn_with_state(
             state.clone(),
             rate_limit_middleware,
@@ -99,6 +99,10 @@ pub fn build_router(state: AppState) -> Router {
         .layer(TraceLayer::new_for_http())
         .layer(CorsLayer::permissive())
         .with_state(state)
+}
+
+async fn health_check() -> &'static str {
+    "ok"
 }
 
 #[async_trait]
@@ -658,7 +662,6 @@ async fn auth_middleware(
     mut request: Request<Body>,
     next: Next,
 ) -> Response {
-    let request_id = request_id_from_request(&request);
     let token = bearer_token(request.headers())
         .or_else(|| {
             request
@@ -668,21 +671,30 @@ async fn auth_middleware(
         })
         .map(str::to_string);
 
-    let Some(token) = token else {
-        return ApiError::new(
-            ContextraError::Unauthorized("missing authorization token".to_string()),
-            Some(request_id),
+    // Open access: if a token is provided and valid, attach its context;
+    // otherwise attach a default permissive AuthContext without requiring authentication.
+    let context = if let Some(token) = token {
+        state
+            .service
+            .authenticate(&token)
+            .await
+            .unwrap_or_else(|_| {
+                AuthContext::new(
+                    types::UserId::new(),
+                    types::OrgId::new(),
+                    vec!["*:*".to_string()],
+                )
+            })
+    } else {
+        AuthContext::new(
+            types::UserId::new(),
+            types::OrgId::new(),
+            vec!["*:*".to_string()],
         )
-        .into_response();
     };
 
-    match state.service.authenticate(&token).await {
-        Ok(context) => {
-            request.extensions_mut().insert(context);
-            next.run(request).await
-        }
-        Err(error) => ApiError::new(error, Some(request_id)).into_response(),
-    }
+    request.extensions_mut().insert(context);
+    next.run(request).await
 }
 
 async fn rate_limit_middleware(

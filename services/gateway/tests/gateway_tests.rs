@@ -155,7 +155,7 @@ fn test_app() -> (axum::Router, String) {
 }
 
 #[tokio::test]
-async fn test_auth_missing_header_returns_401() {
+async fn test_open_auth_missing_header_succeeds() {
     let (app, _) = test_app();
     let response = app
         .oneshot(
@@ -167,24 +167,24 @@ async fn test_auth_missing_header_returns_401() {
         .await
         .unwrap();
 
-    assert_eq!(response.status(), StatusCode::UNAUTHORIZED);
+    assert_eq!(response.status(), StatusCode::OK);
 }
 
 #[tokio::test]
-async fn test_auth_invalid_api_key_returns_401() {
+async fn test_open_auth_any_api_key_succeeds() {
     let (app, _) = test_app();
     let response = app
         .oneshot(
             Request::builder()
                 .uri("/api/v1/collections?limit=1")
-                .header("x-api-key", "invalid.key")
+                .header("x-api-key", "any-random-key")
                 .body(Body::empty())
                 .unwrap(),
         )
         .await
         .unwrap();
 
-    assert_eq!(response.status(), StatusCode::UNAUTHORIZED);
+    assert_eq!(response.status(), StatusCode::OK);
 }
 
 #[tokio::test]

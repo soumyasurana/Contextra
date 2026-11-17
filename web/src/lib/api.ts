@@ -23,7 +23,7 @@ async function fetchWithTimeout(url: string, options: RequestInit = {}, timeoutM
   }
 }
 
-function authHeaders(apiKey: string): Record<string, string> {
+function authHeaders(apiKey?: string): Record<string, string> {
   const headers: Record<string, string> = {
     'Content-Type': 'application/json',
   };
@@ -134,7 +134,7 @@ function mapMessage(msg: BackendMessageResource): ChatMessage {
 
 export const api = {
   // ─── Documents ───────────────────────────────────────────────────
-  async getDocuments(apiKey: string, gatewayUrl?: string): Promise<{ items: DocumentResource[]; totalCount: number }> {
+  async getDocuments(apiKey?: string, gatewayUrl?: string): Promise<{ items: DocumentResource[]; totalCount: number }> {
     const base = gatewayUrl || DEFAULT_GATEWAY_URL;
     try {
       const res = await fetchWithTimeout(`${base}/api/v1/documents`, {
@@ -151,7 +151,7 @@ export const api = {
     }
   },
 
-  async createDocument(sourcePath: string, apiKey: string, gatewayUrl?: string): Promise<DocumentResource | null> {
+  async createDocument(sourcePath: string, apiKey?: string, gatewayUrl?: string): Promise<DocumentResource | null> {
     const base = gatewayUrl || DEFAULT_GATEWAY_URL;
     try {
       const res = await fetchWithTimeout(`${base}/api/v1/documents`, {
@@ -167,7 +167,7 @@ export const api = {
     }
   },
 
-  async deleteDocument(id: string, apiKey: string, gatewayUrl?: string): Promise<boolean> {
+  async deleteDocument(id: string, apiKey?: string, gatewayUrl?: string): Promise<boolean> {
     const base = gatewayUrl || DEFAULT_GATEWAY_URL;
     try {
       const res = await fetchWithTimeout(`${base}/api/v1/documents/${id}`, {
@@ -181,7 +181,7 @@ export const api = {
   },
 
   // ─── Collections ─────────────────────────────────────────────────
-  async getCollections(apiKey: string, gatewayUrl?: string): Promise<{ items: CollectionResource[]; totalCount: number }> {
+  async getCollections(apiKey?: string, gatewayUrl?: string): Promise<{ items: CollectionResource[]; totalCount: number }> {
     const base = gatewayUrl || DEFAULT_GATEWAY_URL;
     try {
       const res = await fetchWithTimeout(`${base}/api/v1/collections`, {
@@ -198,7 +198,7 @@ export const api = {
     }
   },
 
-  async createCollection(name: string, metadata: Record<string, unknown> = {}, apiKey: string, gatewayUrl?: string): Promise<CollectionResource | null> {
+  async createCollection(name: string, metadata: Record<string, unknown> = {}, apiKey?: string, gatewayUrl?: string): Promise<CollectionResource | null> {
     const base = gatewayUrl || DEFAULT_GATEWAY_URL;
     try {
       const res = await fetchWithTimeout(`${base}/api/v1/collections`, {
@@ -214,7 +214,7 @@ export const api = {
     }
   },
 
-  async deleteCollection(id: string, apiKey: string, gatewayUrl?: string): Promise<boolean> {
+  async deleteCollection(id: string, apiKey?: string, gatewayUrl?: string): Promise<boolean> {
     const base = gatewayUrl || DEFAULT_GATEWAY_URL;
     try {
       const res = await fetchWithTimeout(`${base}/api/v1/collections/${id}`, {
@@ -228,7 +228,7 @@ export const api = {
   },
 
   // ─── Conversations ───────────────────────────────────────────────
-  async getConversations(apiKey: string, gatewayUrl?: string): Promise<{ items: ConversationResource[]; totalCount: number }> {
+  async getConversations(apiKey?: string, gatewayUrl?: string): Promise<{ items: ConversationResource[]; totalCount: number }> {
     const base = gatewayUrl || DEFAULT_GATEWAY_URL;
     try {
       const res = await fetchWithTimeout(`${base}/api/v1/conversations`, {
@@ -245,7 +245,7 @@ export const api = {
     }
   },
 
-  async createConversation(title: string | undefined, apiKey: string, gatewayUrl?: string): Promise<ConversationResource | null> {
+  async createConversation(title: string | undefined, apiKey?: string, gatewayUrl?: string): Promise<ConversationResource | null> {
     const base = gatewayUrl || DEFAULT_GATEWAY_URL;
     try {
       const res = await fetchWithTimeout(`${base}/api/v1/conversations`, {
@@ -262,7 +262,7 @@ export const api = {
   },
 
   // ─── Messages ────────────────────────────────────────────────────
-  async getMessages(conversationId: string, apiKey: string, gatewayUrl?: string): Promise<ChatMessage[]> {
+  async getMessages(conversationId: string, apiKey?: string, gatewayUrl?: string): Promise<ChatMessage[]> {
     const base = gatewayUrl || DEFAULT_GATEWAY_URL;
     try {
       const res = await fetchWithTimeout(
@@ -277,7 +277,7 @@ export const api = {
     }
   },
 
-  async sendMessage(conversationId: string, message: string, apiKey: string, gatewayUrl?: string): Promise<ChatMessage | null> {
+  async sendMessage(conversationId: string, message: string, apiKey?: string, gatewayUrl?: string): Promise<ChatMessage | null> {
     const base = gatewayUrl || DEFAULT_GATEWAY_URL;
     try {
       const res = await fetchWithTimeout(
@@ -304,17 +304,27 @@ export const api = {
   },
 
   // ─── Health ──────────────────────────────────────────────────────
-  async checkHealth(apiKey: string, gatewayUrl?: string): Promise<boolean> {
-    const base = gatewayUrl || DEFAULT_GATEWAY_URL;
+
+  async checkHealth(
+    _apiKey?: string,
+    gatewayUrl?: string,
+  ): Promise<boolean> {
+    const base = (gatewayUrl || DEFAULT_GATEWAY_URL).replace(/\/+$/, '');
+
     try {
       const res = await fetchWithTimeout(
-        `${base}/api/v1/collections?limit=1`,
-        { headers: authHeaders(apiKey) },
-        2000,
+        `${base}/health`,
+        {
+          method: 'GET',
+          cache: 'no-store',
+        },
+        5000,
       );
+
       return res.ok;
     } catch {
       return false;
     }
   },
+
 };
