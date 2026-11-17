@@ -5,7 +5,28 @@ import {
   ChatMessage,
 } from '@/types';
 
-export const DEFAULT_GATEWAY_URL = process.env.NEXT_PUBLIC_GATEWAY_URL || 'https://contextra.blocklogsecurity.com';
+export const DEFAULT_GATEWAY_URL =
+  process.env.NEXT_PUBLIC_GATEWAY_URL &&
+  process.env.NEXT_PUBLIC_GATEWAY_URL !== 'https://contextra.blocklogsecurity.com'
+    ? process.env.NEXT_PUBLIC_GATEWAY_URL
+    : '';
+
+export function getBaseUrl(gatewayUrl?: string): string {
+  if (
+    gatewayUrl &&
+    gatewayUrl.trim() &&
+    gatewayUrl !== 'https://contextra.blocklogsecurity.com'
+  ) {
+    return gatewayUrl.replace(/\/+$/, '');
+  }
+  if (
+    DEFAULT_GATEWAY_URL &&
+    DEFAULT_GATEWAY_URL !== 'https://contextra.blocklogsecurity.com'
+  ) {
+    return DEFAULT_GATEWAY_URL.replace(/\/+$/, '');
+  }
+  return '';
+}
 
 /** Kept for backwards-compat with components that read the env URL for display */
 export const GATEWAY_URL = DEFAULT_GATEWAY_URL;
@@ -135,7 +156,7 @@ function mapMessage(msg: BackendMessageResource): ChatMessage {
 export const api = {
   // ─── Documents ───────────────────────────────────────────────────
   async getDocuments(apiKey?: string, gatewayUrl?: string): Promise<{ items: DocumentResource[]; totalCount: number }> {
-    const base = gatewayUrl || DEFAULT_GATEWAY_URL;
+    const base = getBaseUrl(gatewayUrl);
     try {
       const res = await fetchWithTimeout(`${base}/api/v1/documents`, {
         headers: authHeaders(apiKey),
@@ -152,7 +173,7 @@ export const api = {
   },
 
   async createDocument(sourcePath: string, apiKey?: string, gatewayUrl?: string): Promise<DocumentResource | null> {
-    const base = gatewayUrl || DEFAULT_GATEWAY_URL;
+    const base = getBaseUrl(gatewayUrl);
     try {
       const res = await fetchWithTimeout(`${base}/api/v1/documents`, {
         method: 'POST',
@@ -168,7 +189,7 @@ export const api = {
   },
 
   async deleteDocument(id: string, apiKey?: string, gatewayUrl?: string): Promise<boolean> {
-    const base = gatewayUrl || DEFAULT_GATEWAY_URL;
+    const base = getBaseUrl(gatewayUrl);
     try {
       const res = await fetchWithTimeout(`${base}/api/v1/documents/${id}`, {
         method: 'DELETE',
@@ -182,7 +203,7 @@ export const api = {
 
   // ─── Collections ─────────────────────────────────────────────────
   async getCollections(apiKey?: string, gatewayUrl?: string): Promise<{ items: CollectionResource[]; totalCount: number }> {
-    const base = gatewayUrl || DEFAULT_GATEWAY_URL;
+    const base = getBaseUrl(gatewayUrl);
     try {
       const res = await fetchWithTimeout(`${base}/api/v1/collections`, {
         headers: authHeaders(apiKey),
@@ -199,7 +220,7 @@ export const api = {
   },
 
   async createCollection(name: string, metadata: Record<string, unknown> = {}, apiKey?: string, gatewayUrl?: string): Promise<CollectionResource | null> {
-    const base = gatewayUrl || DEFAULT_GATEWAY_URL;
+    const base = getBaseUrl(gatewayUrl);
     try {
       const res = await fetchWithTimeout(`${base}/api/v1/collections`, {
         method: 'POST',
@@ -215,7 +236,7 @@ export const api = {
   },
 
   async deleteCollection(id: string, apiKey?: string, gatewayUrl?: string): Promise<boolean> {
-    const base = gatewayUrl || DEFAULT_GATEWAY_URL;
+    const base = getBaseUrl(gatewayUrl);
     try {
       const res = await fetchWithTimeout(`${base}/api/v1/collections/${id}`, {
         method: 'DELETE',
@@ -229,7 +250,7 @@ export const api = {
 
   // ─── Conversations ───────────────────────────────────────────────
   async getConversations(apiKey?: string, gatewayUrl?: string): Promise<{ items: ConversationResource[]; totalCount: number }> {
-    const base = gatewayUrl || DEFAULT_GATEWAY_URL;
+    const base = getBaseUrl(gatewayUrl);
     try {
       const res = await fetchWithTimeout(`${base}/api/v1/conversations`, {
         headers: authHeaders(apiKey),
@@ -246,7 +267,7 @@ export const api = {
   },
 
   async createConversation(title: string | undefined, apiKey?: string, gatewayUrl?: string): Promise<ConversationResource | null> {
-    const base = gatewayUrl || DEFAULT_GATEWAY_URL;
+    const base = getBaseUrl(gatewayUrl);
     try {
       const res = await fetchWithTimeout(`${base}/api/v1/conversations`, {
         method: 'POST',
@@ -263,7 +284,7 @@ export const api = {
 
   // ─── Messages ────────────────────────────────────────────────────
   async getMessages(conversationId: string, apiKey?: string, gatewayUrl?: string): Promise<ChatMessage[]> {
-    const base = gatewayUrl || DEFAULT_GATEWAY_URL;
+    const base = getBaseUrl(gatewayUrl);
     try {
       const res = await fetchWithTimeout(
         `${base}/api/v1/conversations/${conversationId}/messages`,
@@ -278,7 +299,7 @@ export const api = {
   },
 
   async sendMessage(conversationId: string, message: string, apiKey?: string, gatewayUrl?: string): Promise<ChatMessage | null> {
-    const base = gatewayUrl || DEFAULT_GATEWAY_URL;
+    const base = getBaseUrl(gatewayUrl);
     try {
       const res = await fetchWithTimeout(
         `${base}/api/v1/conversations/${conversationId}/messages`,
@@ -309,11 +330,11 @@ export const api = {
     _apiKey?: string,
     gatewayUrl?: string,
   ): Promise<boolean> {
-    const base = (gatewayUrl || DEFAULT_GATEWAY_URL).replace(/\/+$/, '');
+    const base = getBaseUrl(gatewayUrl);
 
     try {
       const res = await fetchWithTimeout(
-        `${base}/health`,
+        base ? `${base}/health` : '/health',
         {
           method: 'GET',
           cache: 'no-store',

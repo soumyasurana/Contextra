@@ -169,9 +169,12 @@ export default function SettingsPage() {
                 type="text"
                 value={form.gateway_url}
                 onChange={(e) => setForm({ ...form, gateway_url: e.target.value })}
-                placeholder={DEFAULT_GATEWAY_URL}
+                placeholder={DEFAULT_GATEWAY_URL || 'Same-origin proxy (/api/v1)'}
                 className="w-full p-2.5 bg-zinc-900 border border-white/10 rounded-xl text-zinc-100 font-mono text-xs focus:outline-none focus:border-amber-500/50"
               />
+              <p className="mt-1 text-[11px] text-zinc-500">
+                Leave empty to automatically proxy requests to the internal Gateway service.
+              </p>
             </div>
 
             <div>
