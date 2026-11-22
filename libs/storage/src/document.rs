@@ -2,7 +2,7 @@ use crate::db::PgPool;
 use crate::repository::Repository;
 use async_trait::async_trait;
 use errors::ContextraError;
-use sqlx::FromRow;
+use sqlx::{FromRow, PgConnection};
 use types::{Chunk, CollectionId, Document, DocumentId};
 use uuid::Uuid;
 
@@ -32,6 +32,27 @@ impl DocumentRepository {
     }
 
     pub async fn create_chunk(&self, chunk: &Chunk) -> Result<(), ContextraError> {
+        let mut connection = self.pool.inner().acquire().await.map_err(storage_error)?;
+        Self::insert_chunk(&mut connection, chunk).await
+    }
+
+    pub async fn create_with_chunks(
+        &self,
+        document: &Document,
+        chunks: &[Chunk],
+    ) -> Result<(), ContextraError> {
+        let mut transaction = self.pool.inner().begin().await.map_err(storage_error)?;
+        Self::insert_document(&mut transaction, document).await?;
+        for chunk in chunks {
+            Self::insert_chunk(&mut transaction, chunk).await?;
+        }
+        transaction.commit().await.map_err(storage_error)
+    }
+
+    async fn insert_chunk(
+        connection: &mut PgConnection,
+        chunk: &Chunk,
+    ) -> Result<(), ContextraError> {
         let metadata_json = serde_json::to_value(&chunk.metadata).map_err(|e| {
             ContextraError::StorageError(format!("Failed to serialize metadata: {}", e))
         })?;
@@ -46,9 +67,34 @@ impl DocumentRepository {
         .bind(Uuid::from(chunk.document_id))
         .bind(&chunk.content)
         .bind(metadata_json)
-        .execute(self.pool.inner())
+        .execute(connection)
         .await
         .map_err(|e| ContextraError::StorageError(format!("Failed to create chunk: {}", e)))?;
+
+        Ok(())
+    }
+
+    async fn insert_document(
+        connection: &mut PgConnection,
+        entity: &Document,
+    ) -> Result<(), ContextraError> {
+        let metadata_json = serde_json::to_value(&entity.metadata).map_err(|e| {
+            ContextraError::StorageError(format!("Failed to serialize metadata: {}", e))
+        })?;
+
+        sqlx::query(
+            r#"
+            INSERT INTO documents (id, collection_id, content, metadata)
+            VALUES ($1, $2, $3, $4)
+            "#,
+        )
+        .bind(Uuid::from(entity.id))
+        .bind(Uuid::from(entity.collection_id))
+        .bind(&entity.content)
+        .bind(metadata_json)
+        .execute(connection)
+        .await
+        .map_err(|e| ContextraError::StorageError(format!("Failed to create document: {}", e)))?;
 
         Ok(())
     }
@@ -95,7 +141,9 @@ impl DocumentRepository {
         let records = if let Some(cid) = collection_id {
             sqlx::query_as::<_, DocumentRow>(
                 r#"
-                SELECT id, collection_id, content, metadata
+                SELECT id, collection_id, content, metadata || jsonb_build_object(
+                    'chunks_count', (SELECT COUNT(*) FROM chunks WHERE document_id = documents.id)
+                ) AS metadata
                 FROM documents
                 WHERE collection_id = $1
                 ORDER BY id
@@ -110,7 +158,9 @@ impl DocumentRepository {
         } else {
             sqlx::query_as::<_, DocumentRow>(
                 r#"
-                SELECT id, collection_id, content, metadata
+                SELECT id, collection_id, content, metadata || jsonb_build_object(
+                    'chunks_count', (SELECT COUNT(*) FROM chunks WHERE document_id = documents.id)
+                ) AS metadata
                 FROM documents
                 ORDER BY id
                 LIMIT $1 OFFSET $2
@@ -173,25 +223,8 @@ impl Repository<Document, DocumentId> for DocumentRepository {
     }
 
     async fn create(&self, entity: &Document) -> Result<(), ContextraError> {
-        let metadata_json = serde_json::to_value(&entity.metadata).map_err(|e| {
-            ContextraError::StorageError(format!("Failed to serialize metadata: {}", e))
-        })?;
-
-        sqlx::query(
-            r#"
-            INSERT INTO documents (id, collection_id, content, metadata)
-            VALUES ($1, $2, $3, $4)
-            "#,
-        )
-        .bind(Uuid::from(entity.id))
-        .bind(Uuid::from(entity.collection_id))
-        .bind(&entity.content)
-        .bind(metadata_json)
-        .execute(self.pool.inner())
-        .await
-        .map_err(|e| ContextraError::StorageError(format!("Failed to create document: {}", e)))?;
-
-        Ok(())
+        let mut connection = self.pool.inner().acquire().await.map_err(storage_error)?;
+        Self::insert_document(&mut connection, entity).await
     }
 
     async fn update(&self, entity: &Document) -> Result<(), ContextraError> {
@@ -245,4 +278,8 @@ impl Repository<Document, DocumentId> for DocumentRepository {
 
         Ok(())
     }
+}
+
+fn storage_error(error: sqlx::Error) -> ContextraError {
+    ContextraError::StorageError(error.to_string())
 }

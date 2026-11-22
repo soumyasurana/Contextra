@@ -5,7 +5,6 @@ import { useRouter } from 'next/navigation';
 import { motion } from 'framer-motion';
 import {
   History,
-  Clock,
   ArrowRight,
   Search,
   BrainCircuit,
@@ -14,21 +13,18 @@ import {
   MessageSquare,
 } from 'lucide-react';
 import { useAppStore } from '@/lib/store';
-import { api } from '@/lib/api';
-import { toast } from 'sonner';
 
 export default function ConversationsPage() {
   const router = useRouter();
   const {
     conversations,
     conversationsLoading,
-    settings,
+    conversationsError,
     fetchConversations,
     setActiveConversationId,
   } = useAppStore();
 
   const [searchQuery, setSearchQuery] = useState('');
-  const [isCreating, setIsCreating] = useState(false);
 
   useEffect(() => {
     fetchConversations();
@@ -45,27 +41,6 @@ export default function ConversationsPage() {
     router.push('/chat');
   };
 
-  const handleCreateNewConversation = async () => {
-    if (isCreating) return;
-    setIsCreating(true);
-    try {
-      const created = await api.createConversation('New Context Session', settings.api_key);
-      if (created) {
-        toast.success('Created new conversation session');
-        setActiveConversationId(created.id);
-        router.push('/chat');
-      } else {
-        const fallbackId = `conv_${Date.now()}`;
-        setActiveConversationId(fallbackId);
-        router.push('/chat');
-      }
-    } catch {
-      toast.error('Failed to create conversation');
-    } finally {
-      setIsCreating(false);
-    }
-  };
-
   return (
     <div className="space-y-6">
       {/* Page Header */}
@@ -73,27 +48,27 @@ export default function ConversationsPage() {
         <div>
           <h1 className="text-2xl font-bold tracking-tight text-white flex items-center space-x-2">
             <History className="w-6 h-6 text-teal-400" />
-            <span>Conversation Memory History</span>
+            <span>Conversations</span>
           </h1>
           <p className="text-sm text-zinc-400 mt-1">
-            Timeline of stored conversation threads, dynamic importance summaries, and token memory footprints.
+            Find and resume conversations saved by the gateway.
           </p>
         </div>
 
         <div className="flex items-center space-x-3">
           <button
             onClick={() => fetchConversations()}
+            disabled={conversationsLoading}
             className="px-3.5 py-2.5 rounded-xl glass-card text-xs text-zinc-300 hover:text-white flex items-center space-x-2 transition-colors"
           >
             <RefreshCw className={`w-4 h-4 ${conversationsLoading ? 'animate-spin' : ''}`} />
             <span>Sync</span>
           </button>
           <button
-            onClick={handleCreateNewConversation}
-            disabled={isCreating}
+            onClick={() => handleOpenConversation('')}
             className="px-4 py-2.5 rounded-xl bg-gradient-to-r from-teal-600 to-indigo-600 hover:from-teal-500 hover:to-indigo-500 text-white font-medium text-sm flex items-center justify-center space-x-2 shadow-lg shadow-teal-500/25 transition-all hover:scale-[1.02]"
           >
-            {isCreating ? <RefreshCw className="w-4 h-4 animate-spin" /> : <Plus className="w-4 h-4" />}
+            <Plus className="w-4 h-4" />
             <span>New Session</span>
           </button>
         </div>
@@ -107,14 +82,17 @@ export default function ConversationsPage() {
             type="text"
             value={searchQuery}
             onChange={(e) => setSearchQuery(e.target.value)}
-            placeholder="Search conversation memory..."
+            aria-label="Search conversations"
+            placeholder="Search conversations…"
             className="w-full pl-9 pr-4 py-2 bg-zinc-900/80 border border-white/10 rounded-xl text-sm text-zinc-100 placeholder-zinc-500 focus:outline-none focus:border-teal-500/50"
           />
         </div>
       </div>
 
       {/* Timeline UI List */}
-      {conversationsLoading ? (
+      {conversationsError ? (
+        <p role="alert" className="glass-panel rounded-2xl p-6 text-sm text-rose-300">{conversationsError} Select Sync to retry.</p>
+      ) : conversationsLoading ? (
         <div className="p-12 text-center text-zinc-400 text-sm flex items-center justify-center space-x-2">
           <RefreshCw className="w-4 h-4 animate-spin text-teal-400" />
           <span>Loading conversations from backend...</span>
@@ -122,8 +100,8 @@ export default function ConversationsPage() {
       ) : filtered.length === 0 ? (
         <div className="glass-panel rounded-2xl p-12 text-center text-zinc-500 space-y-3">
           <MessageSquare className="w-12 h-12 text-zinc-600 mx-auto" />
-          <p className="text-sm font-semibold text-zinc-300">No conversation threads stored</p>
-          <p className="text-xs text-zinc-500">Start a new conversation session to build persistent long-term memory.</p>
+          <p className="text-sm font-semibold text-zinc-300">{searchQuery ? "No matching conversations" : "No conversations yet"}</p>
+          <p className="text-xs text-zinc-500">{searchQuery ? "Try a different search." : "Start a chat to save your first conversation."}</p>
         </div>
       ) : (
         <div className="relative border-l-2 border-white/10 ml-4 pl-6 space-y-6">
@@ -132,7 +110,7 @@ export default function ConversationsPage() {
               key={conv.id}
               initial={{ opacity: 0, x: -15 }}
               animate={{ opacity: 1, x: 0 }}
-              transition={{ duration: 0.2, delay: idx * 0.05 }}
+              transition={{ duration: 0.2, delay: Math.min(idx, 8) * 0.03 }}
               className="relative group"
             >
               {/* Timeline Dot */}
@@ -148,7 +126,7 @@ export default function ConversationsPage() {
                       <h3 className="text-base font-bold text-white group-hover:text-teal-300 transition-colors">
                         {conv.title}
                       </h3>
-                      <p className="text-[11px] text-zinc-500 font-mono">ID: {conv.id}</p>
+                      <p className="text-[11px] text-zinc-500 font-mono break-all">ID: {conv.id}</p>
                     </div>
                   </div>
 

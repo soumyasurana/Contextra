@@ -1,17 +1,15 @@
 'use client';
 
-import React, { useEffect, useState } from 'react';
+import React, { Suspense, useEffect, useState } from 'react';
+import { useSearchParams, useRouter } from 'next/navigation';
 import { motion, AnimatePresence } from 'framer-motion';
 import {
   FileText,
   UploadCloud,
   Search,
-  Trash2,
   Eye,
   X,
   CheckCircle2,
-  AlertCircle,
-  Clock,
   FileCode,
   RefreshCw,
 } from 'lucide-react';
@@ -21,6 +19,10 @@ import { api } from '@/lib/api';
 import { toast } from 'sonner';
 
 export default function DocumentsPage() {
+  return <Suspense fallback={<p role="status" className="text-sm text-zinc-400">Loading documents…</p>}><DocumentRegistry /></Suspense>;
+}
+
+function DocumentRegistry() {
   const {
     documents,
     documentsLoading,
@@ -28,18 +30,26 @@ export default function DocumentsPage() {
     settings,
     fetchDocuments,
     fetchCollections,
-    addDocument,
-    deleteDocument,
+    documentsError,
+    collectionsError,
   } = useAppStore();
 
   const [searchQuery, setSearchQuery] = useState('');
-  const [selectedStatus, setSelectedStatus] = useState<string>('all');
   const [selectedCollection, setSelectedCollection] = useState<string>('all');
-  const [selectedDoc, setSelectedDoc] = useState<DocumentResource | null>(null);
+  const router = useRouter();
+  const searchParams = useSearchParams();
+  const selectedDocId = searchParams.get('document');
+  const selectedDoc = documents.find((document) => document.id === selectedDocId);
+  const setSelectedDoc = (document: DocumentResource | null) => {
+    router.replace(document ? `/documents?document=${encodeURIComponent(document.id)}` : '/documents', { scroll: false });
+  };
   const [uploadModalOpen, setUploadModalOpen] = useState(false);
 
   // Upload state
-  const [sourcePathInput, setSourcePathInput] = useState('');
+  const [name, setName] = useState('');
+  const [content, setContent] = useState('');
+  const [targetCollection, setTargetCollection] = useState('');
+  const collectionNames = new Map(collections.map((collection) => [collection.id, collection.name]));
   const [isSubmitting, setIsSubmitting] = useState(false);
 
   useEffect(() => {
@@ -49,42 +59,33 @@ export default function DocumentsPage() {
 
   const filteredDocs = documents.filter((doc) => {
     const matchesSearch = doc.name.toLowerCase().includes(searchQuery.toLowerCase());
-    const matchesStatus = selectedStatus === 'all' || doc.status === selectedStatus;
     const matchesCollection = selectedCollection === 'all' || doc.collection_id === selectedCollection;
-    return matchesSearch && matchesStatus && matchesCollection;
+    return matchesSearch && matchesCollection;
   });
 
   const handleIngest = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!sourcePathInput.trim() || isSubmitting) return;
+    if (!name.trim() || !content.trim() || isSubmitting) return;
 
+    if (new TextEncoder().encode(content).length > 250_000) {
+      toast.error('Document text must be 250 KB or smaller.');
+      return;
+    }
     setIsSubmitting(true);
     try {
-      const created = await api.createDocument(sourcePathInput.trim(), settings.api_key);
-      if (created) {
-        addDocument(created);
-        toast.success(`Successfully ingested document: ${created.name}`);
-      } else {
-        // Fallback local document creation if backend API unreachable or errors
-        const fallbackDoc: DocumentResource = {
-          id: `doc_${Date.now()}`,
-          name: sourcePathInput.split('/').pop() || sourcePathInput,
-          collection_id: collections[0]?.id || 'col_default',
-          collection_name: collections[0]?.name || 'Default Collection',
-          status: 'Ingested',
-          chunks_count: 1,
-          file_size: 'Local',
-          uploaded_at: 'Just now',
-          metadata: { source_path: sourcePathInput },
-          raw_content: `Source path: ${sourcePathInput}`,
-        };
-        addDocument(fallbackDoc);
-        toast.success(`Ingested ${fallbackDoc.name} (local)`);
-      }
-      setSourcePathInput('');
+      const document = await api.createDocument(
+        { name: name.trim(), content, collection_id: targetCollection || undefined },
+        settings.api_key,
+        settings.gateway_url,
+      );
+      setName('');
+      setContent('');
+      setTargetCollection('');
       setUploadModalOpen(false);
-    } catch {
-      toast.error('Failed to ingest document');
+      toast.success(`Ingested ${document.name}`);
+      await fetchDocuments();
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : 'Failed to ingest document.');
     } finally {
       setIsSubmitting(false);
     }
@@ -97,16 +98,17 @@ export default function DocumentsPage() {
         <div>
           <h1 className="text-2xl font-bold tracking-tight text-white flex items-center space-x-2">
             <FileText className="w-6 h-6 text-indigo-400" />
-            <span>Document Ingestion Registry</span>
+            <span>Documents</span>
           </h1>
           <p className="text-sm text-zinc-400 mt-1">
-            Manage raw documents, chunking configs, status pipelines, and vector index bindings.
+            Ingest text or Markdown and browse documents by collection.
           </p>
         </div>
 
         <div className="flex items-center space-x-3">
           <button
-            onClick={() => fetchDocuments()}
+            onClick={() => { void fetchDocuments(); void fetchCollections(); }}
+            disabled={documentsLoading}
             className="px-3.5 py-2.5 rounded-xl glass-card text-xs text-zinc-300 hover:text-white flex items-center space-x-2 transition-colors"
           >
             <RefreshCw className={`w-4 h-4 ${documentsLoading ? 'animate-spin' : ''}`} />
@@ -132,6 +134,7 @@ export default function DocumentsPage() {
             type="text"
             value={searchQuery}
             onChange={(e) => setSearchQuery(e.target.value)}
+            aria-label="Search documents by name"
             placeholder="Search documents by name..."
             className="w-full pl-9 pr-4 py-2 bg-zinc-900/80 border border-white/10 rounded-xl text-sm text-zinc-100 placeholder-zinc-500 focus:outline-none focus:border-indigo-500/50"
           />
@@ -139,20 +142,9 @@ export default function DocumentsPage() {
 
         {/* Filters */}
         <div className="flex items-center space-x-3 w-full md:w-auto">
-          {/* Status Filter */}
-          <select
-            value={selectedStatus}
-            onChange={(e) => setSelectedStatus(e.target.value)}
-            className="px-3 py-2 bg-zinc-900/80 border border-white/10 rounded-xl text-xs text-zinc-300 focus:outline-none focus:border-indigo-500/50 cursor-pointer"
-          >
-            <option value="all">All Statuses</option>
-            <option value="Ingested">Ingested</option>
-            <option value="Processing">Processing</option>
-            <option value="Failed">Failed</option>
-          </select>
-
           {/* Collection Filter */}
           <select
+            aria-label="Filter by collection"
             value={selectedCollection}
             onChange={(e) => setSelectedCollection(e.target.value)}
             className="px-3 py-2 bg-zinc-900/80 border border-white/10 rounded-xl text-xs text-zinc-300 focus:outline-none focus:border-indigo-500/50 cursor-pointer"
@@ -169,7 +161,9 @@ export default function DocumentsPage() {
 
       {/* Document Data Table */}
       <div className="glass-panel rounded-2xl overflow-hidden border border-white/10 shadow-2xl">
-        {documentsLoading ? (
+        {documentsError ? (
+          <p role="alert" className="px-6 py-8 text-sm text-rose-300">{documentsError} Select Sync to retry.</p>
+        ) : documentsLoading ? (
           <div className="p-12 text-center text-zinc-400 text-sm flex items-center justify-center space-x-2">
             <RefreshCw className="w-4 h-4 animate-spin text-indigo-400" />
             <span>Loading documents from backend...</span>
@@ -180,7 +174,7 @@ export default function DocumentsPage() {
               <thead className="bg-zinc-950/80 text-xs uppercase font-semibold text-zinc-400 border-b border-white/10">
                 <tr>
                   <th className="px-6 py-4">Document Name</th>
-                  <th className="px-6 py-4">Collection ID</th>
+                  <th className="px-6 py-4">Collection</th>
                   <th className="px-6 py-4">Status</th>
                   <th className="px-6 py-4">Chunks</th>
                   <th className="px-6 py-4">File Size</th>
@@ -197,7 +191,7 @@ export default function DocumentsPage() {
                       <span className="truncate max-w-xs">{doc.name}</span>
                     </td>
                     <td className="px-6 py-4 font-mono text-xs text-zinc-400">
-                      {doc.collection_id}
+                      {collectionNames.get(doc.collection_id) || doc.collection_name || "Unassigned"}
                     </td>
                     <td className="px-6 py-4">
                       <span className="inline-flex items-center space-x-1.5 px-2.5 py-1 rounded-full text-xs font-semibold bg-emerald-500/10 text-emerald-400 border border-emerald-500/20">
@@ -215,28 +209,13 @@ export default function DocumentsPage() {
                       >
                         <Eye className="w-4 h-4" />
                       </button>
-                      <button
-                        onClick={async () => {
-                          const ok = await api.deleteDocument(doc.id, settings.api_key, settings.gateway_url);
-                          if (ok) {
-                            deleteDocument(doc.id);
-                            toast.success(`Removed ${doc.name}`);
-                          } else {
-                            toast.error(`Failed to delete ${doc.name}`);
-                          }
-                        }}
-                        className="p-1.5 rounded-lg bg-zinc-800 hover:bg-rose-900/50 text-zinc-400 hover:text-rose-300 transition-colors"
-                        title="Delete Document"
-                      >
-                        <Trash2 className="w-4 h-4" />
-                      </button>
                     </td>
                   </tr>
                 ))}
                 {filteredDocs.length === 0 && (
                   <tr>
                     <td colSpan={6} className="px-6 py-12 text-center text-zinc-500 text-sm">
-                      No documents found in registry.
+                      {searchQuery || selectedCollection !== "all" ? "No documents match the current filters." : "No documents yet. Ingest a document to get started."}
                     </td>
                   </tr>
                 )}
@@ -270,20 +249,49 @@ export default function DocumentsPage() {
               </div>
 
               <form onSubmit={handleIngest} className="space-y-4">
-                <div>
-                  <label className="block text-xs font-semibold text-zinc-300 mb-1">Source File Path</label>
+                <label className="block text-xs font-semibold text-zinc-300">
+                  Text or Markdown file
                   <input
-                    type="text"
-                    required
-                    value={sourcePathInput}
-                    onChange={(e) => setSourcePathInput(e.target.value)}
-                    placeholder="e.g. /path/to/document.md or docs/architecture.md"
-                    className="w-full px-3.5 py-2 bg-zinc-900 border border-white/10 rounded-xl text-sm text-zinc-100 font-mono placeholder-zinc-500 focus:outline-none focus:border-indigo-500/50"
+                    type="file"
+                    accept=".txt,.md,.markdown,text/plain,text/markdown"
+                    disabled={isSubmitting}
+                    className="mt-1 block w-full text-zinc-400"
+                    onChange={async (event) => {
+                      const file = event.target.files?.[0];
+                      if (!file) return;
+                      if (file.size > 250_000) {
+                        toast.error('Select a text file smaller than 250 KB.');
+                        return;
+                      }
+                      try {
+                        setContent(new TextDecoder('utf-8', { fatal: true }).decode(await file.arrayBuffer()));
+                        setName(file.name);
+                      } catch {
+                        toast.error('Unable to read the file as UTF-8 text.');
+                      }
+                    }}
                   />
-                  <p className="text-[11px] text-zinc-500 mt-1">
-                    The Rust gateway processes source documents from your local filesystem or storage path.
-                  </p>
-                </div>
+                </label>
+                <label className="block text-xs font-semibold text-zinc-300">
+                  Document name
+                  <input required maxLength={255} value={name} onChange={(event) => setName(event.target.value)}
+                    className="mt-1 w-full rounded-xl border border-white/10 bg-zinc-900 px-3 py-2" />
+                </label>
+                <label className="block text-xs font-semibold text-zinc-300">
+                  Document content
+                  <textarea required rows={5} value={content} onChange={(event) => setContent(event.target.value)}
+                    placeholder="Paste text or choose a file above"
+                    className="mt-1 w-full rounded-xl border border-white/10 bg-zinc-900 px-3 py-2 font-mono" />
+                </label>
+                <label className="block text-xs font-semibold text-zinc-300">
+                  Collection
+                  <select value={targetCollection} onChange={(event) => setTargetCollection(event.target.value)}
+                    className="mt-1 w-full rounded-xl border border-white/10 bg-zinc-900 px-3 py-2">
+                    <option value="">Unassigned</option>
+                    {collections.map((collection) => <option key={collection.id} value={collection.id}>{collection.name}</option>)}
+                  </select>
+                  {collectionsError && <span className="mt-1 block text-rose-300">Could not load collections.</span>}
+                </label>
 
                 <div className="flex items-center justify-end space-x-3 pt-4 border-t border-white/10">
                   <button
@@ -295,8 +303,8 @@ export default function DocumentsPage() {
                   </button>
                   <button
                     type="submit"
-                    disabled={isSubmitting}
-                    className="px-4 py-2 bg-gradient-to-r from-indigo-600 to-purple-600 hover:from-indigo-500 hover:to-purple-500 text-white rounded-xl text-xs font-semibold shadow-md flex items-center space-x-2"
+                    disabled={isSubmitting || !name.trim() || !content.trim()}
+                    className="disabled:opacity-50 px-4 py-2 bg-gradient-to-r from-indigo-600 to-purple-600 hover:from-indigo-500 hover:to-purple-500 text-white rounded-xl text-xs font-semibold shadow-md flex items-center space-x-2"
                   >
                     {isSubmitting && <RefreshCw className="w-3.5 h-3.5 animate-spin" />}
                     <span>Ingest Document</span>

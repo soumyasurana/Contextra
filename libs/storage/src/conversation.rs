@@ -2,7 +2,7 @@ use crate::db::PgPool;
 use crate::repository::Repository;
 use async_trait::async_trait;
 use errors::ContextraError;
-use sqlx::FromRow;
+use sqlx::{FromRow, PgConnection};
 use types::{ConversationId, Message, Metadata, Role};
 use uuid::Uuid;
 
@@ -129,7 +129,9 @@ impl ConversationRepository {
 
         let rows = sqlx::query_as::<_, ConvRow>(
             r#"
-            SELECT id, title, metadata
+            SELECT id, title, metadata || jsonb_build_object(
+                'message_count', (SELECT COUNT(*) FROM messages WHERE conversation_id = conversations.id)
+            ) AS metadata
             FROM conversations
             ORDER BY id DESC
             LIMIT $1 OFFSET $2
@@ -154,6 +156,50 @@ impl ConversationRepository {
         }
 
         Ok(convs)
+    }
+
+    pub async fn save_turn(
+        &self,
+        user: &Message,
+        assistant: &Message,
+    ) -> Result<(), ContextraError> {
+        let mut transaction = self
+            .pool
+            .inner()
+            .begin()
+            .await
+            .map_err(message_write_error)?;
+        Self::insert(&mut transaction, user).await?;
+        Self::insert(&mut transaction, assistant).await?;
+        transaction.commit().await.map_err(message_write_error)
+    }
+
+    async fn insert(connection: &mut PgConnection, entity: &Message) -> Result<(), ContextraError> {
+        let metadata_json = serde_json::to_value(&entity.metadata).map_err(|e| {
+            ContextraError::StorageError(format!("Failed to serialize metadata: {}", e))
+        })?;
+
+        let role_json = serde_json::to_string(&entity.role).map_err(|e| {
+            ContextraError::StorageError(format!("Failed to serialize role: {}", e))
+        })?;
+        let role_str = role_json.trim_matches('"');
+
+        sqlx::query(
+            r#"
+            INSERT INTO messages (id, conversation_id, role, content, metadata)
+            VALUES ($1, $2, $3, $4, $5)
+            "#,
+        )
+        .bind(entity.id)
+        .bind(Uuid::from(entity.conversation_id))
+        .bind(role_str)
+        .bind(&entity.content)
+        .bind(metadata_json)
+        .execute(connection)
+        .await
+        .map_err(|e| ContextraError::StorageError(format!("Failed to create message: {}", e)))?;
+
+        Ok(())
     }
 
     pub async fn get_messages_by_conversation(
@@ -236,31 +282,13 @@ impl Repository<Message, Uuid> for ConversationRepository {
     }
 
     async fn create(&self, entity: &Message) -> Result<(), ContextraError> {
-        let metadata_json = serde_json::to_value(&entity.metadata).map_err(|e| {
-            ContextraError::StorageError(format!("Failed to serialize metadata: {}", e))
-        })?;
-
-        let role_json = serde_json::to_string(&entity.role).map_err(|e| {
-            ContextraError::StorageError(format!("Failed to serialize role: {}", e))
-        })?;
-        let role_str = role_json.trim_matches('"');
-
-        sqlx::query(
-            r#"
-            INSERT INTO messages (id, conversation_id, role, content, metadata)
-            VALUES ($1, $2, $3, $4, $5)
-            "#,
-        )
-        .bind(entity.id)
-        .bind(Uuid::from(entity.conversation_id))
-        .bind(role_str)
-        .bind(&entity.content)
-        .bind(metadata_json)
-        .execute(self.pool.inner())
-        .await
-        .map_err(|e| ContextraError::StorageError(format!("Failed to create message: {}", e)))?;
-
-        Ok(())
+        let mut connection = self
+            .pool
+            .inner()
+            .acquire()
+            .await
+            .map_err(message_write_error)?;
+        Self::insert(&mut connection, entity).await
     }
 
     async fn update(&self, entity: &Message) -> Result<(), ContextraError> {
@@ -320,4 +348,8 @@ impl Repository<Message, Uuid> for ConversationRepository {
 
         Ok(())
     }
+}
+
+fn message_write_error(error: sqlx::Error) -> ContextraError {
+    ContextraError::StorageError(format!("Failed to save messages: {error}"))
 }

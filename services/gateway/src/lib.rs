@@ -69,7 +69,10 @@ pub fn build_router(state: AppState) -> Router {
             "/collections",
             get(list_collections).post(create_collection),
         )
-        .route("/collections/:collection_id", get(get_collection))
+        .route(
+            "/collections/:collection_id",
+            get(get_collection).patch(update_collection),
+        )
         .route(
             "/conversations",
             get(list_conversations).post(create_conversation),
@@ -91,11 +94,11 @@ pub fn build_router(state: AppState) -> Router {
         .route("/health", get(health_check))
         .nest("/api/v1", protected_api)
         .merge(SwaggerUi::new("/docs").url("/api-docs/openapi.json", ApiDoc::openapi()))
-        .layer(middleware::from_fn(request_id_middleware))
         .layer(middleware::from_fn_with_state(
             state.clone(),
             rate_limit_middleware,
         ))
+        .layer(middleware::from_fn(request_id_middleware))
         .layer(TraceLayer::new_for_http())
         .layer(CorsLayer::permissive())
         .with_state(state)
@@ -133,6 +136,16 @@ pub trait GatewayService: Send + Sync {
         &self,
         request: CreateCollectionRequest,
     ) -> Result<CollectionResource, ContextraError>;
+
+    async fn update_collection(
+        &self,
+        _id: CollectionId,
+        _request: CreateCollectionRequest,
+    ) -> Result<CollectionResource, ContextraError> {
+        Err(ContextraError::ServiceUnavailable(
+            "Collection updates are unavailable".into(),
+        ))
+    }
 
     async fn list_conversations(
         &self,
@@ -173,9 +186,15 @@ impl Pagination {
         }
 
         let cursor = match query.cursor {
-            Some(cursor) => Some(cursor.parse::<usize>().map_err(|_| {
-                ContextraError::Validation("cursor must be an opaque pagination token".to_string())
-            })?),
+            Some(cursor) => Some(
+                cursor
+                    .parse::<usize>()
+                    .ok()
+                    .filter(|offset| *offset <= (i64::MAX as usize).saturating_sub(MAX_LIMIT))
+                    .ok_or_else(|| {
+                        ContextraError::Validation("invalid pagination cursor".to_string())
+                    })?,
+            ),
             None => None,
         };
 
@@ -218,15 +237,32 @@ impl From<types::Document> for DocumentResource {
 
 #[derive(Debug, Clone, Deserialize, ToSchema)]
 pub struct CreateDocumentRequest {
+    // The legacy JSON field carried either a path or text. Always treat it as text.
+    #[serde(rename = "content", alias = "source_path")]
     pub source_path: String,
     pub collection_id: Option<String>,
+    pub name: Option<String>,
 }
 
 impl CreateDocumentRequest {
     fn validate(&self) -> Result<(), ContextraError> {
         if self.source_path.trim().is_empty() {
             return Err(ContextraError::Validation(
-                "source_path is required".to_string(),
+                "content is required".to_string(),
+            ));
+        }
+        if self.source_path.len() > 250_000 {
+            return Err(ContextraError::Validation(
+                "content must be 250 KB or smaller".into(),
+            ));
+        }
+        if self
+            .name
+            .as_ref()
+            .is_some_and(|name| name.chars().count() > 255)
+        {
+            return Err(ContextraError::Validation(
+                "name must be 255 characters or fewer".into(),
             ));
         }
         Ok(())
@@ -518,6 +554,30 @@ async fn create_collection(
 }
 
 #[utoipa::path(
+    patch,
+    path = "/api/v1/collections/{collection_id}",
+    params(("collection_id" = String, Path, description = "Collection id")),
+    request_body = CreateCollectionRequest,
+    responses((status = 200, body = CollectionResource), (status = 404, body = ErrorEnvelope)),
+    tag = "collections"
+)]
+async fn update_collection(
+    Extension(request_id): Extension<RequestId>,
+    State(service): State<Arc<dyn GatewayService>>,
+    Path(collection_id): Path<CollectionId>,
+    Json(payload): Json<CreateCollectionRequest>,
+) -> ApiResult<Json<CollectionResource>> {
+    payload
+        .validate()
+        .map_err(|error| ApiError::new(error, Some(request_id.clone())))?;
+    service
+        .update_collection(collection_id, payload)
+        .await
+        .map(Json)
+        .map_err(|error| ApiError::new(error, Some(request_id)))
+}
+
+#[utoipa::path(
     get,
     path = "/api/v1/conversations",
     params(PaginationQuery),
@@ -704,16 +764,9 @@ async fn rate_limit_middleware(
 ) -> Response {
     let request_id = request_id_from_request(&request);
     let key = request
-        .headers()
-        .get(header::AUTHORIZATION)
-        .and_then(|value| value.to_str().ok())
-        .map(ToString::to_string)
-        .or_else(|| {
-            request
-                .extensions()
-                .get::<ConnectInfo<SocketAddr>>()
-                .map(|ConnectInfo(addr)| addr.ip().to_string())
-        })
+        .extensions()
+        .get::<ConnectInfo<SocketAddr>>()
+        .map(|ConnectInfo(addr)| addr.ip().to_string())
         .unwrap_or_else(|| "anonymous".to_string());
 
     if state.rate_limiter.allow(&key) {
@@ -804,6 +857,7 @@ impl TokenBucketRateLimiter {
         list_collections,
         get_collection,
         create_collection,
+        update_collection,
         list_conversations,
         create_conversation,
         list_messages,

@@ -42,10 +42,42 @@ impl CollectionRepository {
         Ok(())
     }
 
+    pub async fn update(
+        &self,
+        id: CollectionId,
+        name: &str,
+        metadata: &Metadata,
+    ) -> Result<Option<Collection>, ContextraError> {
+        let row = sqlx::query_as::<_, CollectionRow>(
+            "UPDATE collections SET name = $2, metadata = metadata || $3::jsonb WHERE id = $1 RETURNING id, name, metadata",
+        )
+        .bind(Uuid::from(id))
+        .bind(name)
+        .bind(sqlx::types::Json(metadata))
+        .fetch_optional(self.pool.inner())
+        .await
+        .map_err(|error| ContextraError::StorageError(format!("Failed to update collection: {error}")))?;
+
+        row.map(|row| {
+            Ok(Collection {
+                id: CollectionId::from(row.id),
+                name: row.name,
+                metadata: decode_metadata(row.metadata)?,
+            })
+        })
+        .transpose()
+    }
+
     pub async fn get(&self, id: CollectionId) -> Result<Option<Collection>, ContextraError> {
         let row = sqlx::query_as::<_, CollectionRow>(
             r#"
-            SELECT id, name, metadata
+            SELECT id, name, metadata || jsonb_build_object(
+                'documents_count', (SELECT COUNT(*) FROM documents WHERE collection_id = collections.id),
+                'chunks_count', (
+                    SELECT COUNT(*) FROM chunks JOIN documents ON chunks.document_id = documents.id
+                    WHERE documents.collection_id = collections.id
+                )
+            ) AS metadata
             FROM collections
             WHERE id = $1
             "#,
@@ -73,7 +105,13 @@ impl CollectionRepository {
     pub async fn list(&self, limit: i64, offset: i64) -> Result<Vec<Collection>, ContextraError> {
         let rows = sqlx::query_as::<_, CollectionRow>(
             r#"
-            SELECT id, name, metadata
+            SELECT id, name, metadata || jsonb_build_object(
+                'documents_count', (SELECT COUNT(*) FROM documents WHERE collection_id = collections.id),
+                'chunks_count', (
+                    SELECT COUNT(*) FROM chunks JOIN documents ON chunks.document_id = documents.id
+                    WHERE documents.collection_id = collections.id
+                )
+            ) AS metadata
             FROM collections
             ORDER BY name, id
             LIMIT $1 OFFSET $2

@@ -1,175 +1,115 @@
 'use client';
 
-import React, { useEffect, useState, useRef } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { useRouter } from 'next/navigation';
+import { ArrowRight, FileText, Search, X } from 'lucide-react';
 import { useAppStore } from '@/lib/store';
-import {
-  Search,
-  LayoutDashboard,
-  FileText,
-  FolderArchive,
-  MessageSquare,
-  History,
-  GitMerge,
-  Code2,
-  BarChart3,
-  Settings,
-  Sparkles,
-  ArrowRight,
-  Database,
-  Terminal,
-} from 'lucide-react';
-import { motion, AnimatePresence } from 'framer-motion';
+import { navItems } from './sidebar';
 
 export function CommandPalette() {
   const router = useRouter();
-  const { commandPaletteOpen, setCommandPaletteOpen, documents, collections } = useAppStore();
+  const { commandPaletteOpen, setCommandPaletteOpen, documents, fetchDocuments } = useAppStore();
   const [query, setQuery] = useState('');
-  // Keep a ref to the current open state so the keydown handler doesn't go stale
-  const openRef = useRef(commandPaletteOpen);
-  useEffect(() => { openRef.current = commandPaletteOpen; }, [commandPaletteOpen]);
+  const [activeIndex, setActiveIndex] = useState(0);
+  const dialogRef = useRef<HTMLDialogElement>(null);
+  const inputRef = useRef<HTMLInputElement>(null);
+  const optionsRef = useRef<HTMLDivElement>(null);
+  const normalizedQuery = query.trim().toLowerCase();
+  const items = [
+    ...navItems.filter((item) => item.name.toLowerCase().includes(normalizedQuery)),
+    ...(normalizedQuery ? documents.filter((doc) => doc.name.toLowerCase().includes(normalizedQuery)).slice(0, 5)
+      .map((doc) => ({ name: doc.name, href: `/documents?document=${encodeURIComponent(doc.id)}`, icon: FileText })) : []),
+  ];
+  const selected = Math.min(activeIndex, items.length - 1);
 
   useEffect(() => {
-    const handleKeyDown = (e: KeyboardEvent) => {
-      if ((e.metaKey || e.ctrlKey) && e.key === 'k') {
-        e.preventDefault();
-        setCommandPaletteOpen(!openRef.current);
+    function toggle(event: KeyboardEvent) {
+      if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === 'k' && !event.repeat) {
+        event.preventDefault();
+        setCommandPaletteOpen(!useAppStore.getState().commandPaletteOpen);
       }
-      if (e.key === 'Escape') {
-        setCommandPaletteOpen(false);
-      }
-    };
-    window.addEventListener('keydown', handleKeyDown);
-    return () => window.removeEventListener('keydown', handleKeyDown);
+    }
+    window.addEventListener('keydown', toggle);
+    return () => window.removeEventListener('keydown', toggle);
   }, [setCommandPaletteOpen]);
 
-  const navItems = [
-    { name: 'Dashboard', icon: LayoutDashboard, path: '/dashboard', cat: 'Navigation' },
-    { name: 'Documents', icon: FileText, path: '/documents', cat: 'Navigation' },
-    { name: 'Collections', icon: FolderArchive, path: '/collections', cat: 'Navigation' },
-    { name: 'Playground Chat', icon: MessageSquare, path: '/chat', cat: 'Navigation' },
-    { name: 'Conversations History', icon: History, path: '/conversations', cat: 'Navigation' },
-    { name: 'Retrieval Explorer', icon: GitMerge, path: '/retrieval', cat: 'Navigation' },
-    { name: 'Prompt Studio', icon: Code2, path: '/prompts', cat: 'Navigation' },
-    { name: 'Evaluation Benchmarks', icon: BarChart3, path: '/evaluation', cat: 'Navigation' },
-    { name: 'Settings & API Keys', icon: Settings, path: '/settings', cat: 'Navigation' },
-  ];
+  useEffect(() => {
+    const dialog = dialogRef.current;
+    if (commandPaletteOpen && dialog && !dialog.open) {
+      dialog.showModal();
+      inputRef.current?.focus();
+      if (!useAppStore.getState().documentsLoading) void fetchDocuments();
+    }
+    if (!commandPaletteOpen && dialog?.open) dialog.close();
+  }, [commandPaletteOpen, fetchDocuments]);
 
-  const filteredNav = navItems.filter((i) =>
-    i.name.toLowerCase().includes(query.toLowerCase())
-  );
-
-  const filteredDocs = documents
-    .filter((d) => d.name.toLowerCase().includes(query.toLowerCase()))
-    .slice(0, 3);
-
-  const handleSelect = (path: string) => {
+  function select(href: string) {
     setCommandPaletteOpen(false);
-    setQuery('');
-    router.push(path);
-  };
+    router.push(href);
+  }
 
   return (
-    <AnimatePresence>
-      {commandPaletteOpen && (
-        <div className="fixed inset-0 z-50 flex items-start justify-center pt-24 px-4 bg-black/70 backdrop-blur-md">
-          <motion.div
-            initial={{ opacity: 0, scale: 0.95, y: -10 }}
-            animate={{ opacity: 1, scale: 1, y: 0 }}
-            exit={{ opacity: 0, scale: 0.95, y: -10 }}
-            transition={{ duration: 0.15 }}
-            className="w-full max-w-2xl overflow-hidden glass-panel rounded-2xl border border-white/10 shadow-2xl"
+    <dialog
+      ref={dialogRef}
+      aria-label="Search workspace"
+      onClick={(event) => { if (event.target === event.currentTarget) setCommandPaletteOpen(false); }}
+      onClose={() => {
+        setCommandPaletteOpen(false);
+        setQuery('');
+        setActiveIndex(0);
+      }}
+      className="fixed inset-x-0 top-[min(18dvh,7rem)] m-auto mt-0 w-[calc(100%-2rem)] max-w-xl overflow-hidden rounded-2xl border border-white/10 bg-zinc-950 text-zinc-100 shadow-2xl backdrop:bg-black/70 backdrop:backdrop-blur-sm"
+    >
+      <div className="flex items-center gap-3 border-b border-white/10 px-4 py-3">
+        <Search className="size-5 shrink-0 text-zinc-400" />
+        <input
+          ref={inputRef}
+          className="min-w-0 flex-1 bg-transparent text-sm outline-none"
+          placeholder="Search pages and documents…"
+          role="combobox"
+          aria-label="Search pages and documents"
+          aria-expanded={commandPaletteOpen}
+          aria-controls="workspace-search-results"
+          aria-activedescendant={selected >= 0 ? `workspace-option-${selected}` : undefined}
+          value={query}
+          onChange={(event) => { setQuery(event.target.value); setActiveIndex(0); }}
+          onKeyDown={(event) => {
+            if (!items.length) return;
+            if (event.key === 'Enter') {
+              event.preventDefault();
+              select(items[selected].href);
+            }
+            if (event.key === 'ArrowDown' || event.key === 'ArrowUp') {
+              event.preventDefault();
+              const direction = event.key === 'ArrowDown' ? 1 : -1;
+              const next = (selected + direction + items.length) % items.length;
+              setActiveIndex(next);
+              optionsRef.current?.children[next]?.scrollIntoView({ block: 'nearest' });
+            }
+          }}
+        />
+        <button type="button" aria-label="Close search" onClick={() => setCommandPaletteOpen(false)} className="rounded-lg p-1 text-zinc-400 hover:bg-white/10"><X className="size-4" /></button>
+      </div>
+      <div id="workspace-search-results" ref={optionsRef} role="listbox" aria-label="Search results" className="max-h-[55dvh] overflow-y-auto p-2">
+        {items.map(({ name, href, icon: Icon }, index) => (
+          <button
+            key={href}
+            id={`workspace-option-${index}`}
+            type="button"
+            tabIndex={-1}
+            role="option"
+            aria-selected={index === selected}
+            onClick={() => select(href)}
+            onMouseEnter={() => setActiveIndex(index)}
+            className={`flex w-full items-center gap-3 rounded-xl px-3 py-2 text-left text-sm ${index === selected ? 'bg-indigo-500/20 text-white' : 'text-zinc-300'}`}
           >
-            {/* Input Header */}
-            <div className="flex items-center px-4 py-3.5 border-b border-white/10 bg-zinc-900/60">
-              <Search className="w-5 h-5 text-zinc-400 mr-3 shrink-0" />
-              <input
-                type="text"
-                value={query}
-                onChange={(e) => setQuery(e.target.value)}
-                placeholder="Type a command or search documents..."
-                autoFocus
-                className="w-full bg-transparent text-sm text-zinc-100 placeholder-zinc-500 focus:outline-none"
-              />
-              <kbd className="px-2 py-0.5 text-xs text-zinc-400 bg-zinc-800 rounded border border-zinc-700">
-                ESC
-              </kbd>
-            </div>
-
-            {/* Results Body */}
-            <div className="max-h-96 overflow-y-auto p-2 space-y-4">
-              {/* Navigation Commands */}
-              {filteredNav.length > 0 && (
-                <div>
-                  <div className="px-3 py-1.5 text-[11px] font-semibold text-zinc-400 uppercase tracking-wider">
-                    Navigation
-                  </div>
-                  <div className="space-y-0.5">
-                    {filteredNav.map((item) => {
-                      const Icon = item.icon;
-                      return (
-                        <button
-                          key={item.path}
-                          onClick={() => handleSelect(item.path)}
-                          className="w-full flex items-center justify-between px-3 py-2 rounded-xl text-sm text-zinc-300 hover:text-white hover:bg-indigo-600/20 hover:border-indigo-500/30 border border-transparent transition-all group"
-                        >
-                          <div className="flex items-center space-x-3">
-                            <Icon className="w-4 h-4 text-zinc-400 group-hover:text-indigo-400" />
-                            <span>{item.name}</span>
-                          </div>
-                          <ArrowRight className="w-4 h-4 opacity-0 group-hover:opacity-100 text-indigo-400 transition-opacity" />
-                        </button>
-                      );
-                    })}
-                  </div>
-                </div>
-              )}
-
-              {/* Documents Matches */}
-              {filteredDocs.length > 0 && (
-                <div>
-                  <div className="px-3 py-1.5 text-[11px] font-semibold text-zinc-400 uppercase tracking-wider">
-                    Documents
-                  </div>
-                  <div className="space-y-0.5">
-                    {filteredDocs.map((doc) => (
-                      <button
-                        key={doc.id}
-                        onClick={() => handleSelect('/documents')}
-                        className="w-full flex items-center justify-between px-3 py-2 rounded-xl text-sm text-zinc-300 hover:text-white hover:bg-zinc-800/80 transition-all group"
-                      >
-                        <div className="flex items-center space-x-3">
-                          <FileText className="w-4 h-4 text-emerald-400" />
-                          <span className="truncate">{doc.name}</span>
-                        </div>
-                        <span className="text-xs text-zinc-500">{doc.chunks_count} chunks</span>
-                      </button>
-                    ))}
-                  </div>
-                </div>
-              )}
-
-              {filteredNav.length === 0 && filteredDocs.length === 0 && (
-                <div className="py-8 text-center text-sm text-zinc-400">
-                  No matching commands or documents found for &quot;{query}&quot;
-                </div>
-              )}
-            </div>
-
-            {/* Footer */}
-            <div className="px-4 py-2.5 border-t border-white/10 bg-zinc-950/80 flex items-center justify-between text-xs text-zinc-400">
-              <div className="flex items-center space-x-2">
-                <Sparkles className="w-3.5 h-3.5 text-indigo-400" />
-                <span>Contextra AI Platform v1.0</span>
-              </div>
-              <div className="flex items-center space-x-3">
-                <span>Use <kbd className="px-1 py-0.5 bg-zinc-800 rounded border border-zinc-700">↑</kbd> <kbd className="px-1 py-0.5 bg-zinc-800 rounded border border-zinc-700">↓</kbd> to navigate</span>
-                <span><kbd className="px-1 py-0.5 bg-zinc-800 rounded border border-zinc-700">↵</kbd> to select</span>
-              </div>
-            </div>
-          </motion.div>
-        </div>
-      )}
-    </AnimatePresence>
+            <Icon className="size-4 shrink-0 text-indigo-400" />
+            <span className="min-w-0 flex-1 truncate">{name}</span>
+            <ArrowRight className="size-4 shrink-0 text-zinc-400" />
+          </button>
+        ))}
+      </div>
+      {items.length === 0 && <p role="status" className="px-5 pb-5 text-sm text-zinc-400">No matching pages or documents.</p>}
+    </dialog>
   );
 }

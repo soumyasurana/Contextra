@@ -252,13 +252,17 @@ Creating documents (`POST /api/v1/documents`) accepts the following JSON schema:
 
 ```json
 {
-  "source_path": "/path/to/document.md",
+  "name": "document.md",
+  "content": "# Project notes\nDocument text goes here.",
   "collection_id": "018f4a1a-7b3b-7000-8000-000000000001"
 }
 ```
 
-- `source_path` (string, required): Path or raw text content of the document to ingest.
-- `collection_id` (string, optional): Target collection UUID. If omitted, a new collection is allocated.
+- `content` (required) contains raw text or Markdown up to 250 KB. The legacy `source_path` field is accepted as an alias for text.
+- `name` (optional) sets the display name.
+- `collection_id` (optional) must identify an existing collection. Omit it to ingest into the unassigned index.
+
+Use `PATCH /api/v1/collections/{collection_id}` with `name` and optional `metadata` to update a collection. The gateway merges the supplied metadata keys into the stored metadata.
 
 ---
 

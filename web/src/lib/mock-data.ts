@@ -8,28 +8,7 @@ import {
   EvalBenchmark,
   ActivityItem,
   SystemStatusItem,
-  SystemSettings,
 } from '@/types';
-
-export const INITIAL_SETTINGS: SystemSettings = {
-  llm_provider: 'openai',
-  llm_model: 'gpt-4o',
-  embedding_provider: 'openai',
-  embedding_model: 'text-embedding-3-small',
-  chunk_size: 512,
-  chunk_overlap: 64,
-  retrieval_k: 5,
-  temperature: 0.2,
-  top_p: 0.9,
-  max_tokens: 2048,
-  enable_reranker: true,
-  gateway_url:
-    process.env.NEXT_PUBLIC_GATEWAY_URL &&
-    process.env.NEXT_PUBLIC_GATEWAY_URL !== 'https://contextra.blocklogsecurity.com'
-      ? process.env.NEXT_PUBLIC_GATEWAY_URL
-      : '',
-  api_key: '',
-};
 
 export const MOCK_METRICS = {
   total_documents: 142,

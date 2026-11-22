@@ -36,6 +36,7 @@ pub struct VectorStoreSettings {
 #[derive(Debug, Clone, Deserialize, PartialEq)]
 pub struct ProvidersSettings {
     pub provider: Option<String>,
+    pub model: Option<String>,
     pub openai_api_key: Option<String>,
     pub anthropic_api_key: Option<String>,
     pub gemini_api_key: Option<String>,
@@ -88,6 +89,13 @@ impl Settings {
             builder = builder.set_override("vector_store.url", qdrant_url)?;
         }
 
+        if let Ok(api_key) = env::var("QDRANT_API_KEY")
+            && !api_key.trim().is_empty()
+            && env::var("CONTEXTRA__VECTOR_STORE__API_KEY").is_err()
+        {
+            builder = builder.set_override("vector_store.api_key", api_key)?;
+        }
+
         if let Ok(server_host) = env::var("SERVER_HOST")
             && env::var("CONTEXTRA__SERVER__HOST").is_err()
         {
@@ -98,6 +106,19 @@ impl Settings {
             && env::var("CONTEXTRA__SERVER__PORT").is_err()
         {
             builder = builder.set_override("server.port", server_port)?;
+        }
+
+        for (name, field) in [
+            ("OPENAI_API_KEY", "openai_api_key"),
+            ("ANTHROPIC_API_KEY", "anthropic_api_key"),
+            ("GEMINI_API_KEY", "gemini_api_key"),
+        ] {
+            if let Ok(value) = env::var(name)
+                && !value.trim().is_empty()
+                && env::var(format!("CONTEXTRA__PROVIDERS__{field}").to_ascii_uppercase()).is_err()
+            {
+                builder = builder.set_override(format!("providers.{field}"), value)?;
+            }
         }
 
         let config = builder.build()?;

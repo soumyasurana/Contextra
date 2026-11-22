@@ -28,35 +28,36 @@ async fn test_integration_crud() -> Result<(), Box<dyn std::error::Error>> {
     // For this integration test, we will run migrations just to be sure.
     pool.run_migrations().await?;
 
-    // Test Document & Chunk Repository
+    // Test the same atomic write used by the gateway.
     let doc_repo = DocumentRepository::new(pool.clone());
-
     let doc = Document {
         id: DocumentId::new(),
         collection_id: CollectionId::new(),
         content: "Test Document".to_string(),
         metadata: HashMap::new(),
     };
-
-    doc_repo.create(&doc).await?;
-
-    let fetched_doc = doc_repo.get(&doc.id).await?.ok_or("Document not found")?;
-
-    assert_eq!(doc, fetched_doc);
-
-    let mut updated_doc = doc.clone();
-    updated_doc.content = "Updated Document".to_string();
-
-    doc_repo.update(&updated_doc).await?;
-
     let chunk = Chunk {
         id: Uuid::now_v7(),
         document_id: doc.id,
         content: "Test Chunk".to_string(),
         metadata: HashMap::new(),
     };
+    assert!(
+        doc_repo
+            .create_with_chunks(&doc, &[chunk.clone(), chunk.clone()])
+            .await
+            .is_err()
+    );
+    assert!(doc_repo.get(&doc.id).await?.is_none());
+    doc_repo
+        .create_with_chunks(&doc, std::slice::from_ref(&chunk))
+        .await?;
+    let fetched_doc = doc_repo.get(&doc.id).await?.ok_or("Document not found")?;
+    assert_eq!(doc, fetched_doc);
 
-    doc_repo.create_chunk(&chunk).await?;
+    let mut updated_doc = doc.clone();
+    updated_doc.content = "Updated Document".to_string();
+    doc_repo.update(&updated_doc).await?;
 
     let chunks = doc_repo.get_chunks_by_document(&doc.id).await?;
 

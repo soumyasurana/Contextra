@@ -30,8 +30,9 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     );
 
     // 2. Connect to PostgreSQL and run database migrations
-    info!("Connecting to PostgreSQL at {}", settings.database.url);
-    let db = PgPool::connect(&settings.database.url).await?;
+    info!("Connecting to PostgreSQL");
+    let db = PgPool::connect_with_limit(&settings.database.url, settings.database.max_connections)
+        .await?;
 
     info!("Running database migrations...");
     db.run_migrations().await?;

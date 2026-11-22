@@ -78,7 +78,7 @@ cargo test
 ```bash
 DATABASE_URL=postgres://postgres:postgrespassword@localhost:5432/contextra \
 REDIS_URL=redis://localhost:6379 \
-QDRANT_URL=http://localhost:6333 \
+QDRANT_URL=http://localhost:6334 \
 cargo run -p gateway
 ```
 

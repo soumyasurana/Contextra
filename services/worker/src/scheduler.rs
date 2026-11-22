@@ -30,7 +30,7 @@ impl<Q: JobQueue + 'static> Scheduler<Q> {
     pub fn new(queue: Arc<Q>, sweep_interval: Duration) -> Self {
         Self {
             queue,
-            sweep_interval,
+            sweep_interval: sweep_interval.max(Duration::from_secs(1)),
         }
     }
 
@@ -50,11 +50,11 @@ impl<Q: JobQueue + 'static> Scheduler<Q> {
         // Skip ticks that were missed while the worker was busy.
         interval.set_missed_tick_behavior(MissedTickBehavior::Skip);
 
-        loop {
+        while !*shutdown_rx.borrow() {
             tokio::select! {
                 biased;
-                _ = shutdown_rx.changed() => {
-                    if *shutdown_rx.borrow() {
+                changed = shutdown_rx.changed() => {
+                    if changed.is_err() || *shutdown_rx.borrow() {
                         break;
                     }
                 }

@@ -48,7 +48,7 @@ Copy and adapt the example environment file:
 # Minimum required for local development
 export DATABASE_URL="postgres://postgres:postgrespassword@localhost:5432/contextra"
 export REDIS_URL="redis://localhost:6379"
-export QDRANT_URL="http://localhost:6333"
+export QDRANT_URL="http://localhost:6334"
 export CONTEXTRA_ENV=development
 ```
 
@@ -266,12 +266,15 @@ Key variables:
 |----------|---------|-------------|
 | `DATABASE_URL` | — | PostgreSQL connection string |
 | `REDIS_URL` | `redis://localhost:6379` | Redis for job queue and cache |
-| `QDRANT_URL` | `http://localhost:6333` | Qdrant vector store endpoint |
+| `QDRANT_URL` | `http://localhost:6334` | Qdrant vector store endpoint |
 | `CONTEXTRA_ENV` | `development` | Environment name |
 | `WORKER_CONCURRENCY` | `4` | Worker task concurrency |
 | `WORKER_SWEEP_INTERVAL_SECS` | `900` | Memory sweep interval |
 | `CONTEXTRA_GATEWAY_URL` | `http://127.0.0.1:3000` | CLI default Gateway URL |
 | `CONTEXTRA_AUTH_TOKEN` | — | CLI Bearer token |
+| `CONTEXTRA__PROVIDERS__MODEL` | Provider-specific | Gateway model ID |
+| `INTERNAL_GATEWAY_URL` | `http://127.0.0.1:3000` | Gateway reached by the Next.js server. The proxy also accepts `GATEWAY_URL`. |
+| `NEXT_PUBLIC_GATEWAY_URL` | — | Optional browser-side gateway URL, set when building the web app |
 
 ---
 

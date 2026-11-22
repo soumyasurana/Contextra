@@ -75,6 +75,15 @@ impl QdrantVectorStore {
         Ok(Self { client })
     }
 
+    pub async fn remove_collection(&self, name: &str) -> Result<(), ContextraError> {
+        self.client.delete_collection(name).await.map_err(|error| {
+            ContextraError::StorageError(format!(
+                "Failed to delete Qdrant collection '{name}': {error}"
+            ))
+        })?;
+        Ok(())
+    }
+
     fn payload_to_qdrant(payload: &Metadata) -> Result<qdrant_client::Payload, ContextraError> {
         let value = Value::Object(payload.clone().into_iter().collect());
         value.try_into().map_err(|e| {
@@ -130,19 +139,38 @@ impl VectorStore for QdrantVectorStore {
             ));
         }
 
-        self.client
+        if self
+            .client
+            .collection_exists(collection_name)
+            .await
+            .map_err(|error| {
+                ContextraError::StorageError(format!(
+                    "Failed to check Qdrant collection '{collection_name}': {error}"
+                ))
+            })?
+        {
+            return Ok(());
+        }
+
+        let result = self
+            .client
             .create_collection(
                 CreateCollectionBuilder::new(collection_name).vectors_config(
                     VectorParamsBuilder::new(vector_size as u64, Distance::Cosine),
                 ),
             )
-            .await
-            .map_err(|e| {
-                ContextraError::StorageError(format!(
-                    "Failed to create Qdrant collection '{collection_name}': {e}"
-                ))
-            })?;
-
+            .await;
+        if let Err(error) = result
+            && !self
+                .client
+                .collection_exists(collection_name)
+                .await
+                .unwrap_or(false)
+        {
+            return Err(ContextraError::StorageError(format!(
+                "Failed to create Qdrant collection '{collection_name}': {error}"
+            )));
+        }
         Ok(())
     }
 

@@ -1,21 +1,13 @@
 'use client';
 
-import React, { useState } from 'react';
-import { motion } from 'framer-motion';
+import React from 'react';
 import {
   BarChart3,
-  Play,
-  TrendingUp,
   CheckCircle2,
-  AlertCircle,
   Clock,
   Zap,
   Target,
   Award,
-  BarChart,
-  Layers,
-  Sparkles,
-  Loader2,
 } from 'lucide-react';
 import {
   BarChart as ReBarChart,
@@ -28,12 +20,9 @@ import {
   Legend,
 } from 'recharts';
 import { useAppStore } from '@/lib/store';
-import { EvalBenchmark } from '@/types';
-import { toast } from 'sonner';
 
 export default function EvaluationPage() {
-  const { evals, addEvalRun } = useAppStore();
-  const [isRunning, setIsRunning] = useState(false);
+  const evals = useAppStore((state) => state.evals);
 
   const activeRun = evals[0];
 
@@ -43,30 +32,6 @@ export default function EvaluationPage() {
     { strategy: 'Hybrid RRF Merge', recall: 91, precision: 87, mrr: 88, latency: 68 },
     { strategy: 'Hybrid + Cohere Rerank', recall: 96, precision: 92, mrr: 94, latency: 134 },
   ];
-
-  const handleRunEval = () => {
-    setIsRunning(true);
-    toast.info('Started Evaluation Run over 500 ground-truth samples...');
-
-    setTimeout(() => {
-      const newRun: EvalBenchmark = {
-        id: `eval_run_${Date.now()}`,
-        name: 'Automated CI/CD RAG Quality Benchmark',
-        dataset_name: 'tech_docs_ground_truth_500.json',
-        sample_count: 500,
-        pass_rate: 96.8,
-        recall_at_k: 0.948,
-        precision_at_k: 0.895,
-        mrr: 0.922,
-        avg_latency_ms: 128,
-        status: 'Completed',
-        run_at: 'Just now',
-      };
-      addEvalRun(newRun);
-      setIsRunning(false);
-      toast.success('Evaluation Completed! Recall@5 reached 94.8%');
-    }, 1500);
-  };
 
   return (
     <div className="space-y-8">
@@ -78,18 +43,10 @@ export default function EvaluationPage() {
             <span>Evaluation & Quality Benchmarks</span>
           </h1>
           <p className="text-sm text-zinc-400 mt-1">
-            Automated quality regression testing for retrieval recall, precision, MRR, and generation accuracy.
+            Sample benchmark results for retrieval recall, precision, mean reciprocal rank, and latency.
           </p>
         </div>
 
-        <button
-          onClick={handleRunEval}
-          disabled={isRunning}
-          className="px-5 py-2.5 rounded-xl bg-gradient-to-r from-pink-600 to-rose-600 hover:from-pink-500 hover:to-rose-500 text-white font-medium text-sm flex items-center justify-center space-x-2 shadow-lg shadow-pink-500/25 transition-all"
-        >
-          {isRunning ? <Loader2 className="w-4 h-4 animate-spin" /> : <Play className="w-4 h-4 fill-current" />}
-          <span>{isRunning ? 'Running Benchmark...' : 'Run New Evaluation'}</span>
-        </button>
       </div>
 
       {/* Top Quality Metric Cards */}

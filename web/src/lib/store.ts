@@ -4,16 +4,13 @@ import {
   CollectionResource,
   ChatMessage,
   ConversationResource,
-  RetrievedChunk,
   PromptTemplate,
   EvalBenchmark,
   SystemSettings,
 } from '@/types';
 import {
-  INITIAL_SETTINGS,
   MOCK_PROMPTS,
   MOCK_EVAL_BENCHMARKS,
-  MOCK_RETRIEVED_CHUNKS,
 } from './mock-data';
 import { api } from './api';
 
@@ -24,37 +21,29 @@ interface AppState {
 
   // Documents
   documents: DocumentResource[];
-  documentsCount: number;
   documentsLoading: boolean;
-  addDocument: (doc: DocumentResource) => void;
-  deleteDocument: (id: string) => void;
+  documentsError: string | null;
   fetchDocuments: () => Promise<void>;
 
-  // Collections
   collections: CollectionResource[];
-  collectionsCount: number;
   collectionsLoading: boolean;
-  addCollection: (col: CollectionResource) => void;
-  deleteCollection: (id: string) => void;
-  updateCollection: (id: string, name: string, description: string) => void;
+  collectionsError: string | null;
   fetchCollections: () => Promise<void>;
 
-  // Chat
-  activeConversationId: string;
   conversations: ConversationResource[];
   conversationsCount: number;
   conversationsLoading: boolean;
+  conversationsError: string | null;
+  fetchConversations: () => Promise<void>;
+
+  activeConversationId: string;
   messages: ChatMessage[];
   messagesLoading: boolean;
-  retrievedChunks: RetrievedChunk[];
-  selectedChunk: RetrievedChunk | null;
-  isStreaming: boolean;
+  messagesError: string | null;
   setActiveConversationId: (id: string) => void;
-  setSelectedChunk: (chunk: RetrievedChunk | null) => void;
-  addChatMessage: (msg: ChatMessage) => void;
-  setStreaming: (streaming: boolean) => void;
-  fetchConversations: () => Promise<void>;
-  fetchMessages: (conversationId: string) => Promise<void>;
+  fetchMessages: (id: string) => Promise<void>;
+  chatPending: boolean;
+  setChatPending: (pending: boolean) => void;
 
   // Prompts (no backend endpoint — keep mock for now)
   prompts: PromptTemplate[];
@@ -65,129 +54,129 @@ interface AppState {
 
   // Evaluations (no backend endpoint — keep mock for now)
   evals: EvalBenchmark[];
-  addEvalRun: (evalRun: EvalBenchmark) => void;
 
   // Global UI
   commandPaletteOpen: boolean;
   setCommandPaletteOpen: (open: boolean) => void;
   apiConnected: boolean;
-  setApiConnected: (connected: boolean) => void;
 
   // Aggregated dashboard fetch
   fetchDashboardData: () => Promise<void>;
   checkApiHealth: () => Promise<void>;
 }
 
+function errorMessage(error: unknown) {
+  return error instanceof Error ? error.message : 'The gateway request failed.';
+}
+
+const requests = { documents: 0, collections: 0, conversations: 0, messages: 0, health: 0 };
+
 export const useAppStore = create<AppState>((set, get) => ({
   // Settings
-  settings: INITIAL_SETTINGS,
-  updateSettings: (partial) =>
+  settings: { gateway_url: '', api_key: '' },
+  updateSettings: (partial) => {
     set((state) => ({
       settings: { ...state.settings, ...partial },
-    })),
+      apiConnected: false,
+      documents: [], documentsError: null,
+      collections: [], collectionsError: null,
+      conversations: [], conversationsCount: 0, conversationsError: null,
+      activeConversationId: '', messages: [], messagesLoading: false, messagesError: null,
+    }));
+    void get().checkApiHealth();
+  },
 
-  // Documents — start empty, fetch from API
   documents: [],
-  documentsCount: 0,
   documentsLoading: false,
-  addDocument: (doc) =>
-    set((state) => ({
-      documents: [doc, ...state.documents],
-      documentsCount: state.documentsCount + 1,
-    })),
-  deleteDocument: (id) =>
-    set((state) => ({
-      documents: state.documents.filter((d) => d.id !== id),
-      documentsCount: Math.max(0, state.documentsCount - 1),
-    })),
+  documentsError: null,
   fetchDocuments: async () => {
-    set({ documentsLoading: true });
+    const { settings } = get();
+    const requestId = ++requests.documents;
+    set({ documentsLoading: true, documentsError: null });
     try {
-      const { settings } = get();
-      const result = await api.getDocuments(settings.api_key, settings.gateway_url);
-      set({
-        documents: result.items,
-        documentsCount: result.totalCount,
-      });
+      const items = await api.getDocuments(settings.api_key, settings.gateway_url);
+      if (requests.documents === requestId && get().settings === settings) {
+        set({ documents: items });
+      }
+    } catch (error) {
+      if (requests.documents === requestId && get().settings === settings) {
+        set({ documentsError: errorMessage(error) });
+      }
     } finally {
-      set({ documentsLoading: false });
+      if (requests.documents === requestId) set({ documentsLoading: false });
     }
   },
 
-  // Collections — start empty, fetch from API
   collections: [],
-  collectionsCount: 0,
   collectionsLoading: false,
-  addCollection: (col) =>
-    set((state) => ({
-      collections: [col, ...state.collections],
-      collectionsCount: state.collectionsCount + 1,
-    })),
-  deleteCollection: (id) =>
-    set((state) => ({
-      collections: state.collections.filter((c) => c.id !== id),
-      collectionsCount: Math.max(0, state.collectionsCount - 1),
-    })),
-  updateCollection: (id, name, description) =>
-    set((state) => ({
-      collections: state.collections.map((c) =>
-        c.id === id ? { ...c, name, description } : c
-      ),
-    })),
+  collectionsError: null,
   fetchCollections: async () => {
-    set({ collectionsLoading: true });
+    const { settings } = get();
+    const requestId = ++requests.collections;
+    set({ collectionsLoading: true, collectionsError: null });
     try {
-      const { settings } = get();
-      const result = await api.getCollections(settings.api_key, settings.gateway_url);
-      set({
-        collections: result.items,
-        collectionsCount: result.totalCount,
-      });
+      const items = await api.getCollections(settings.api_key, settings.gateway_url);
+      if (requests.collections === requestId && get().settings === settings) {
+        set({ collections: items });
+      }
+    } catch (error) {
+      if (requests.collections === requestId && get().settings === settings) {
+        set({ collectionsError: errorMessage(error) });
+      }
     } finally {
-      set({ collectionsLoading: false });
+      if (requests.collections === requestId) set({ collectionsLoading: false });
     }
   },
 
-  // Chat
-  activeConversationId: '',
   conversations: [],
   conversationsCount: 0,
   conversationsLoading: false,
+  conversationsError: null,
+  fetchConversations: async () => {
+    const { settings } = get();
+    const requestId = ++requests.conversations;
+    set({ conversationsLoading: true, conversationsError: null });
+    try {
+      const items = await api.getConversations(settings.api_key, settings.gateway_url);
+      if (requests.conversations === requestId && get().settings === settings) {
+        set({ conversations: items, conversationsCount: items.length });
+      }
+    } catch (error) {
+      if (requests.conversations === requestId && get().settings === settings) {
+        set({ conversationsError: errorMessage(error) });
+      }
+    } finally {
+      if (requests.conversations === requestId) set({ conversationsLoading: false });
+    }
+  },
+
+  activeConversationId: '',
   messages: [],
   messagesLoading: false,
-  retrievedChunks: MOCK_RETRIEVED_CHUNKS,
-  selectedChunk: MOCK_RETRIEVED_CHUNKS[0] || null,
-  isStreaming: false,
-  setActiveConversationId: (id) => set({ activeConversationId: id }),
-  setSelectedChunk: (chunk) => set({ selectedChunk: chunk }),
-  addChatMessage: (msg) =>
-    set((state) => ({
-      messages: [...state.messages, msg],
-    })),
-  setStreaming: (streaming) => set({ isStreaming: streaming }),
-  fetchConversations: async () => {
-    set({ conversationsLoading: true });
+  messagesError: null,
+  setActiveConversationId: (id) => {
+    if (get().activeConversationId === id) return;
+    requests.messages++;
+    set({ activeConversationId: id, messages: [], messagesLoading: false, messagesError: null });
+  },
+  fetchMessages: async (conversationId) => {
+    const { settings, activeConversationId } = get();
+    if (activeConversationId !== conversationId) return;
+    const requestId = ++requests.messages;
+    const isCurrent = () =>
+      requests.messages === requestId && get().settings === settings && get().activeConversationId === conversationId;
+    set({ messagesLoading: true, messagesError: null });
     try {
-      const { settings } = get();
-      const result = await api.getConversations(settings.api_key, settings.gateway_url);
-      set({
-        conversations: result.items,
-        conversationsCount: result.totalCount,
-      });
+      const messages = await api.getMessages(conversationId, settings.api_key, settings.gateway_url);
+      if (isCurrent()) set({ messages });
+    } catch (error) {
+      if (isCurrent()) set({ messagesError: errorMessage(error) });
     } finally {
-      set({ conversationsLoading: false });
+      if (isCurrent()) set({ messagesLoading: false });
     }
   },
-  fetchMessages: async (conversationId: string) => {
-    set({ messagesLoading: true });
-    try {
-      const { settings } = get();
-      const msgs = await api.getMessages(conversationId, settings.api_key, settings.gateway_url);
-      set({ messages: msgs });
-    } finally {
-      set({ messagesLoading: false });
-    }
-  },
+  chatPending: false,
+  setChatPending: (chatPending) => set({ chatPending }),
 
   // Prompts — no backend endpoint, keep mock data
   prompts: MOCK_PROMPTS,
@@ -207,45 +196,20 @@ export const useAppStore = create<AppState>((set, get) => ({
 
   // Evals — no backend endpoint, keep mock data
   evals: MOCK_EVAL_BENCHMARKS,
-  addEvalRun: (evalRun) =>
-    set((state) => ({
-      evals: [evalRun, ...state.evals],
-    })),
-
   // UI
   commandPaletteOpen: false,
   setCommandPaletteOpen: (open) => set({ commandPaletteOpen: open }),
   apiConnected: false,
-  setApiConnected: (connected) => set({ apiConnected: connected }),
 
-  // Aggregated dashboard fetch — hits all three list endpoints
   fetchDashboardData: async () => {
-    const store = get();
-    const { api_key: apiKey, gateway_url: gatewayUrl } = store.settings;
-
-    // Fire all fetches in parallel
-    const [docsResult, colsResult, convsResult, health] = await Promise.all([
-      api.getDocuments(apiKey, gatewayUrl),
-      api.getCollections(apiKey, gatewayUrl),
-      api.getConversations(apiKey, gatewayUrl),
-      api.checkHealth(apiKey, gatewayUrl),
-    ]);
-
-    set({
-      documents: docsResult.items,
-      documentsCount: docsResult.totalCount,
-      collections: colsResult.items,
-      collectionsCount: colsResult.totalCount,
-      conversations: convsResult.items,
-      conversationsCount: convsResult.totalCount,
-      apiConnected: health,
-    });
+    const { fetchDocuments, fetchCollections, fetchConversations, checkApiHealth } = get();
+    await Promise.all([fetchDocuments(), fetchCollections(), fetchConversations(), checkApiHealth()]);
   },
 
-  // Health check
   checkApiHealth: async () => {
     const { settings } = get();
-    const healthy = await api.checkHealth(settings.api_key, settings.gateway_url);
-    set({ apiConnected: healthy });
+    const requestId = ++requests.health;
+    const healthy = await api.checkHealth(settings.gateway_url);
+    if (requests.health === requestId && get().settings === settings) set({ apiConnected: healthy });
   },
 }));

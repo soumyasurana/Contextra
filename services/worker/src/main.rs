@@ -47,7 +47,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     info!(
         concurrency,
-        sweep_interval_secs, redis_url, "starting contextra worker"
+        sweep_interval_secs, "starting contextra worker"
     );
 
     // -----------------------------------------------------------------------
@@ -90,11 +90,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     // -----------------------------------------------------------------------
     // Graceful shutdown on Ctrl-C / SIGTERM
     // -----------------------------------------------------------------------
-    tokio::select! {
-        _ = tokio::signal::ctrl_c() => {
-            info!("received Ctrl-C, initiating graceful shutdown");
-        }
-    }
+    wait_for_shutdown().await?;
+    info!("received shutdown signal");
 
     shutdown_tx.send(true)?;
 
@@ -103,4 +100,18 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     info!("worker exited cleanly");
     Ok(())
+}
+
+async fn wait_for_shutdown() -> std::io::Result<()> {
+    #[cfg(unix)]
+    {
+        let mut terminate =
+            tokio::signal::unix::signal(tokio::signal::unix::SignalKind::terminate())?;
+        tokio::select! {
+            result = tokio::signal::ctrl_c() => result,
+            _ = terminate.recv() => Ok(()),
+        }
+    }
+    #[cfg(not(unix))]
+    tokio::signal::ctrl_c().await
 }

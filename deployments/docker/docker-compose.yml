@@ -53,7 +53,7 @@ services:
       SERVER_PORT: 3000
       DATABASE_URL: postgres://postgres:postgrespassword@postgres:5432/contextra
       REDIS_URL: redis://redis:6379
-      QDRANT_URL: http://qdrant:6333
+      QDRANT_URL: http://qdrant:6334
     depends_on:
       postgres:
         condition: service_healthy
@@ -70,7 +70,7 @@ services:
       CONTEXTRA_ENV: production
       DATABASE_URL: postgres://postgres:postgrespassword@postgres:5432/contextra
       REDIS_URL: redis://redis:6379
-      QDRANT_URL: http://qdrant:6333
+      QDRANT_URL: http://qdrant:6334
       WORKER_CONCURRENCY: 4
     depends_on:
       postgres:

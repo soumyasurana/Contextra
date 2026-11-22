@@ -5,13 +5,15 @@ use crate::{
 };
 use async_trait::async_trait;
 use auth::{AuthContext, authenticate_api_key};
-use common::pagination::Cursor;
+use common::{
+    pagination::Cursor,
+    time::{Clock, SystemClock},
+};
 use embeddings::{Embedding, EmbeddingError, EmbeddingProvider, OpenAIEmbeddingProvider};
 use errors::ContextraError;
-use ingestion::{FixedSizeChunker, IngestionPipeline, MarkdownParser, PlainTextParser};
+use ingestion::{FixedSizeChunker, IngestionPipeline, ParsedDocument, PlainTextParser};
 use providers::{ChatMessage, ChatRequest, ChatResponse, ChatStream, LLMProvider, ProviderError};
 use settings::Settings;
-use std::path::Path;
 use std::sync::Arc;
 use storage::{
     api_key::PgApiKeyStore,
@@ -22,7 +24,7 @@ use storage::{
     repository::Repository,
     vector_store::{QdrantVectorStore, VectorStore},
 };
-use types::{Collection, CollectionId, ConversationId, Document, DocumentId, Message, Role};
+use types::{Collection, CollectionId, ConversationId, DocumentId, Message, Role};
 use uuid::Uuid;
 
 #[derive(Debug, Clone)]
@@ -132,9 +134,26 @@ impl ProductionGatewayService {
             embedding_provider,
             model_name: settings
                 .providers
-                .provider
-                .clone()
-                .unwrap_or_else(|| "gpt-4o-mini".to_string()),
+                .model
+                .as_deref()
+                .map(str::trim)
+                .filter(|model| !model.is_empty())
+                .unwrap_or_else(|| {
+                    match settings
+                        .providers
+                        .provider
+                        .as_deref()
+                        .unwrap_or("")
+                        .trim()
+                        .to_ascii_lowercase()
+                        .as_str()
+                    {
+                        "anthropic" | "claude" => "claude-sonnet-4-6",
+                        "gemini" | "google" => "gemini-3.5-flash-lite",
+                        _ => "gpt-4o-mini",
+                    }
+                })
+                .to_string(),
         }
     }
 }
@@ -158,7 +177,8 @@ impl GatewayService for ProductionGatewayService {
         let collection_id = filter
             .collection_id
             .as_deref()
-            .and_then(|s| s.parse::<CollectionId>().ok());
+            .map(parse_collection_id)
+            .transpose()?;
 
         let docs = self
             .doc_repo
@@ -192,50 +212,56 @@ impl GatewayService for ProductionGatewayService {
         &self,
         request: CreateDocumentRequest,
     ) -> Result<DocumentResource, ContextraError> {
-        let path = Path::new(&request.source_path);
-        let collection_id = request
-            .collection_id
-            .as_deref()
-            .and_then(|s| s.parse::<CollectionId>().ok())
-            .unwrap_or_default();
-
-        let chunker = FixedSizeChunker::new(512, 64)?;
-        let result = if path.extension().and_then(|e| e.to_str()) == Some("md") {
-            let pipeline = IngestionPipeline::new(
-                MarkdownParser,
-                chunker,
-                self.embedding_provider.clone(),
-                self.vector_store.clone(),
-                collection_id.to_string(),
-                collection_id,
-            );
-            pipeline.ingest_path(path).await?
-        } else if path.exists() {
-            let pipeline = IngestionPipeline::new(
-                PlainTextParser,
-                chunker,
-                self.embedding_provider.clone(),
-                self.vector_store.clone(),
-                collection_id.to_string(),
-                collection_id,
-            );
-            pipeline.ingest_path(path).await?
-        } else {
-            // Direct content ingestion if path doesn't exist as a file on disk
-            let doc_id = DocumentId::new();
-            let doc = Document {
-                id: doc_id,
-                collection_id,
-                content: request.source_path.clone(),
-                metadata: types::Metadata::new(),
-            };
-            self.doc_repo.create(&doc).await?;
-            return Ok(DocumentResource::from(doc));
+        let collection_id = match request.collection_id {
+            Some(id) => {
+                let id = parse_collection_id(&id)?;
+                if self.col_repo.get(id).await?.is_none() {
+                    return Err(ContextraError::NotFound(format!(
+                        "Collection {id} not found"
+                    )));
+                }
+                id
+            }
+            None => CollectionId::from(Uuid::nil()),
         };
 
-        self.doc_repo.create(&result.document).await?;
-        for chunk in &result.chunks {
-            let _ = self.doc_repo.create_chunk(chunk).await;
+        let collection_name = collection_id.to_string();
+        let mut metadata = types::Metadata::new();
+        if let Some(name) = request.name.filter(|name| !name.trim().is_empty()) {
+            metadata.insert("name".into(), serde_json::json!(name.trim()));
+        }
+        metadata.insert(
+            "uploaded_at".into(),
+            serde_json::json!(SystemClock.now().to_rfc3339()),
+        );
+        metadata.insert(
+            "file_size".into(),
+            serde_json::json!(format!("{} B", request.source_path.len())),
+        );
+
+        let pipeline = IngestionPipeline::new(
+            PlainTextParser,
+            FixedSizeChunker::new(512, 64)?,
+            self.embedding_provider.clone(),
+            self.vector_store.clone(),
+            collection_name.clone(),
+            collection_id,
+        );
+        let result = pipeline
+            .ingest_parsed(ParsedDocument::new(request.source_path, metadata))
+            .await?;
+
+        if let Err(error) = self
+            .doc_repo
+            .create_with_chunks(&result.document, &result.chunks)
+            .await
+        {
+            let ids: Vec<_> = result.chunks.iter().map(|chunk| chunk.id).collect();
+            if let Err(cleanup_error) = self.vector_store.delete_by_id(&collection_name, &ids).await
+            {
+                tracing::error!(%cleanup_error, document_id = %result.document.id, "failed to clean up vectors after document write failure");
+            }
+            return Err(error);
         }
 
         Ok(DocumentResource::from(result.document))
@@ -287,22 +313,55 @@ impl GatewayService for ProductionGatewayService {
         &self,
         request: CreateCollectionRequest,
     ) -> Result<CollectionResource, ContextraError> {
+        let mut metadata = request.metadata;
+        metadata.insert(
+            "created_at".into(),
+            serde_json::json!(SystemClock.now().to_rfc3339()),
+        );
         let collection = Collection {
             id: CollectionId::new(),
-            name: request.name,
-            metadata: request.metadata,
+            name: request.name.trim().to_string(),
+            metadata,
         };
 
-        self.col_repo.create(&collection).await?;
-        let _ = self
-            .vector_store
-            .create_collection(&collection.id.to_string(), 1536)
-            .await;
+        self.vector_store
+            .create_collection(
+                &collection.id.to_string(),
+                self.embedding_provider.dimensions(),
+            )
+            .await?;
+        if let Err(error) = self.col_repo.create(&collection).await {
+            if let Err(cleanup_error) = self
+                .vector_store
+                .remove_collection(&collection.id.to_string())
+                .await
+            {
+                tracing::error!(%cleanup_error, collection_id = %collection.id, "failed to clean up vector collection");
+            }
+            return Err(error);
+        }
 
         Ok(CollectionResource {
             id: collection.id.to_string(),
             name: collection.name,
             metadata: collection.metadata,
+        })
+    }
+
+    async fn update_collection(
+        &self,
+        id: CollectionId,
+        request: CreateCollectionRequest,
+    ) -> Result<CollectionResource, ContextraError> {
+        let updated = self
+            .col_repo
+            .update(id, request.name.trim(), &request.metadata)
+            .await?
+            .ok_or_else(|| ContextraError::NotFound(format!("Collection {id} not found")))?;
+        Ok(CollectionResource {
+            id: id.to_string(),
+            name: updated.name,
+            metadata: updated.metadata,
         })
     }
 
@@ -429,32 +488,39 @@ impl GatewayService for ProductionGatewayService {
         }
         chat_messages.push(ChatMessage::user(request.message.clone()));
 
-        // Save user message to DB
+        let req = ChatRequest::new(&self.model_name, chat_messages);
+        let resp = self.llm_provider.chat(req).await?;
+        let reply_content = resp
+            .message
+            .content
+            .as_ref()
+            .filter(|reply| !reply.trim().is_empty())
+            .ok_or_else(|| {
+                ContextraError::ProviderError("The model returned an empty reply".into())
+            })?;
+
+        let timestamp = serde_json::json!(SystemClock.now().to_rfc3339());
         let user_msg = Message {
             id: Uuid::now_v7(),
             conversation_id,
             role: Role::User,
-            content: request.message.clone(),
-            metadata: types::Metadata::new(),
+            content: request.message,
+            metadata: types::Metadata::from([("timestamp".into(), timestamp.clone())]),
         };
-        self.conv_repo.create(&user_msg).await?;
-
-        // 3. Call LLM
-        let req = ChatRequest::new(&self.model_name, chat_messages);
-        let resp = self.llm_provider.chat(req).await?;
-
-        // Save assistant message to DB
-        if let Some(ref reply_content) = resp.message.content {
-            let assistant_msg = Message {
-                id: Uuid::now_v7(),
-                conversation_id,
-                role: Role::Assistant,
-                content: reply_content.clone(),
-                metadata: types::Metadata::new(),
-            };
-            self.conv_repo.create(&assistant_msg).await?;
-        }
+        let assistant_msg = Message {
+            id: Uuid::now_v7(),
+            conversation_id,
+            role: Role::Assistant,
+            content: reply_content.clone(),
+            metadata: types::Metadata::from([("timestamp".into(), timestamp)]),
+        };
+        self.conv_repo.save_turn(&user_msg, &assistant_msg).await?;
 
         Ok(ChatExecutionResponse::from(resp))
     }
+}
+
+fn parse_collection_id(id: &str) -> Result<CollectionId, ContextraError> {
+    id.parse()
+        .map_err(|_| ContextraError::Validation("invalid collection ID".into()))
 }

@@ -1,21 +1,16 @@
 'use client';
 
 import React, { useState, useRef, useEffect } from 'react';
-import { motion, AnimatePresence } from 'framer-motion';
+import { motion } from 'framer-motion';
 import {
   GitMerge,
   Search,
-  Cpu,
-  Layers,
-  Sparkles,
   Zap,
-  ArrowRight,
-  Database,
   CheckCircle2,
   Sliders,
   FileText,
 } from 'lucide-react';
-import { RetrievalStepInfo, RetrievedChunk } from '@/types';
+import { RetrievalStepInfo } from '@/types';
 import { MOCK_RETRIEVED_CHUNKS } from '@/lib/mock-data';
 
 export default function RetrievalPage() {
@@ -111,16 +106,15 @@ export default function RetrievalPage() {
     setIsRunning(true);
     setActiveStep(0);
 
+    let currentStep = 0;
     intervalRef.current = setInterval(() => {
-      setActiveStep((prev) => {
-        if (prev >= steps.length - 1) {
-          if (intervalRef.current !== null) clearInterval(intervalRef.current);
-          intervalRef.current = null;
-          setIsRunning(false);
-          return steps.length - 1;
-        }
-        return prev + 1;
-      });
+      currentStep++;
+      setActiveStep(currentStep);
+      if (currentStep === steps.length - 1) {
+        if (intervalRef.current !== null) clearInterval(intervalRef.current);
+        intervalRef.current = null;
+        setIsRunning(false);
+      }
     }, 400);
   };
 
@@ -133,7 +127,7 @@ export default function RetrievalPage() {
           <span>Retrieval Pipeline Visualizer</span>
         </h1>
         <p className="text-sm text-zinc-400 mt-1">
-          Inspect multi-stage hybrid retrieval execution: Dense Vector Search ➔ BM25 Keyword ➔ RRF Merging ➔ Cross-Encoder Reranking.
+          Explore a sample trace through dense search, BM25, rank fusion, and reranking.
         </p>
       </div>
 
@@ -143,6 +137,7 @@ export default function RetrievalPage() {
           <Search className="w-4 h-4 text-zinc-400 absolute left-3 top-3.5" />
           <input
             type="text"
+            aria-label="Sample query"
             value={testQuery}
             onChange={(e) => setTestQuery(e.target.value)}
             placeholder="Type a test query to trace through the pipeline..."
@@ -155,7 +150,7 @@ export default function RetrievalPage() {
           className="w-full md:w-auto px-5 py-2.5 rounded-xl bg-gradient-to-r from-indigo-600 to-purple-600 hover:from-indigo-500 hover:to-purple-500 text-white font-medium text-sm flex items-center justify-center space-x-2 shadow-lg shadow-indigo-500/20 transition-all shrink-0"
         >
           <Zap className={`w-4 h-4 ${isRunning ? 'animate-bounce text-amber-400' : ''}`} />
-          <span>{isRunning ? 'Executing Steps...' : 'Execute Pipeline Trace'}</span>
+          <span>{isRunning ? 'Playing sample…' : 'Play sample trace'}</span>
         </button>
       </form>
 

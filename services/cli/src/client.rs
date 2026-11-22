@@ -103,7 +103,14 @@ impl GatewayClient {
         collection_id: Option<&str>,
     ) -> Result<DocumentResource, String> {
         let url = format!("{}/api/v1/documents", self.base_url);
-        let mut body = serde_json::json!({ "source_path": source_path });
+        let path = std::path::Path::new(source_path);
+        let content = tokio::fs::read_to_string(path)
+            .await
+            .map_err(|error| format!("Failed to read '{source_path}' as UTF-8: {error}"))?;
+        let mut body = serde_json::json!({
+            "content": content,
+            "name": path.file_name().and_then(|name| name.to_str()),
+        });
         if let Some(col) = collection_id {
             body["collection_id"] = serde_json::json!(col);
         }

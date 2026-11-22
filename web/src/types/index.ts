@@ -133,17 +133,6 @@ export interface ActivityItem {
 }
 
 export interface SystemSettings {
-  llm_provider: 'openai' | 'anthropic' | 'gemini' | 'ollama';
-  llm_model: string;
-  embedding_provider: 'openai' | 'ollama' | 'huggingface';
-  embedding_model: string;
-  chunk_size: number;
-  chunk_overlap: number;
-  retrieval_k: number;
-  temperature: number;
-  top_p: number;
-  max_tokens: number;
-  enable_reranker: boolean;
   gateway_url: string;
   api_key: string;
 }

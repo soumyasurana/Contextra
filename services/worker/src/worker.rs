@@ -84,29 +84,18 @@ async fn worker_loop<Q: JobQueue>(
     worker_id: usize,
     queue: Arc<Q>,
     dispatcher: Arc<Dispatcher>,
-    mut shutdown_rx: watch::Receiver<bool>,
+    shutdown_rx: watch::Receiver<bool>,
 ) {
     info!(worker_id, "worker started");
 
     loop {
         // Check for shutdown before blocking on dequeue.
-        if *shutdown_rx.borrow() {
+        if *shutdown_rx.borrow() || shutdown_rx.has_changed().is_err() {
             break;
         }
 
-        let dequeue_result = tokio::select! {
-            biased;
-            // Honour shutdown even while waiting for a job.
-            _ = shutdown_rx.changed() => {
-                if *shutdown_rx.borrow() {
-                    break;
-                }
-                continue;
-            }
-            result = queue.dequeue(DEQUEUE_TIMEOUT) => result,
-        };
-
-        let job = match dequeue_result {
+        // Let a claim finish so shutdown cannot leave a job unhandled in processing.
+        let job = match queue.dequeue(DEQUEUE_TIMEOUT).await {
             Err(WorkerError::ShuttingDown) => break,
             Err(e) => {
                 error!(worker_id, error = %e, "dequeue error");

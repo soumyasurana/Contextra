@@ -337,11 +337,13 @@ pub fn retrieval_metrics(
         .iter()
         .map(String::as_str)
         .collect::<HashSet<_>>();
-    let top_k = retrieved_chunk_ids.iter().take(k).collect::<Vec<_>>();
-    let relevant_in_top_k = top_k
+    let relevant_in_top_k = retrieved_chunk_ids
         .iter()
-        .filter(|chunk_id| expected.contains(chunk_id.as_str()))
-        .count();
+        .take(k)
+        .map(String::as_str)
+        .filter(|chunk_id| expected.contains(chunk_id))
+        .collect::<HashSet<_>>()
+        .len();
     let first_relevant_rank = retrieved_chunk_ids
         .iter()
         .take(k)

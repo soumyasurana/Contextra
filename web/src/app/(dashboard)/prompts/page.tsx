@@ -1,7 +1,6 @@
 'use client';
 
 import React, { useState } from 'react';
-import dynamic from 'next/dynamic';
 import { motion, AnimatePresence } from 'framer-motion';
 import {
   Code2,
@@ -9,11 +8,6 @@ import {
   Play,
   History,
   Plus,
-  Sparkles,
-  Layers,
-  Copy,
-  Check,
-  CheckCircle2,
   FileCode,
   Sliders,
   X,
@@ -21,9 +15,6 @@ import {
 import { useAppStore } from '@/lib/store';
 import { PromptTemplate } from '@/types';
 import { toast } from 'sonner';
-
-// Dynamically import Monaco Editor to avoid SSR window issues
-const Editor = dynamic(() => import('@monaco-editor/react'), { ssr: false });
 
 export default function PromptStudioPage() {
   const { prompts, activePromptId, setActivePromptId, updatePromptTemplate, addPromptTemplate } = useAppStore();
@@ -37,7 +28,6 @@ export default function PromptStudioPage() {
     conversation_summary: 'User previously inquired about system latency benchmarks.',
   });
   const [testResult, setTestResult] = useState<string | null>(null);
-  const [testing, setTesting] = useState(false);
   const [createModalOpen, setCreateModalOpen] = useState(false);
 
   // Form state
@@ -52,22 +42,13 @@ export default function PromptStudioPage() {
 
   const handleSave = () => {
     updatePromptTemplate(activePrompt.id, editorText);
-    toast.success(`Saved prompt template "${activePrompt.name}"!`);
+    toast.success(`Saved session prompt "${activePrompt.name}"!`);
   };
 
   const handleTestPrompt = () => {
-    setTesting(true);
-    setTestResult(null);
-    setTimeout(() => {
-      let rendered = editorText;
-      Object.entries(testVariables).forEach(([k, v]) => {
-        rendered = rendered.replace(new RegExp(`{{\\s*${k}\\s*}}`, 'g'), v);
-      });
-      setTestResult(
-        `--- SIMULATED LLM RESPONSE ---\n\nContextra RRF Merging algorithm calculates unified relevance by combining vector rank and keyword rank using constant k=60.\n\nExecution Time: 128 ms | Model: GPT-4o`
-      );
-      setTesting(false);
-    }, 800);
+    setTestResult(editorText.replace(/{{\s*([\w.-]+)\s*}}/g, (placeholder, variable: string) =>
+      Object.hasOwn(testVariables, variable) ? testVariables[variable] : placeholder
+    ));
   };
 
   const handleCreatePrompt = (e: React.FormEvent) => {
@@ -94,14 +75,14 @@ export default function PromptStudioPage() {
   };
 
   return (
-    <div className="h-[calc(100vh-7rem)] flex flex-col lg:flex-row gap-6 overflow-hidden">
+    <div className="flex min-w-0 flex-col gap-4 2xl:flex-row">
       {/* Sidebar: Prompt Library & Versions */}
-      <div className="w-full lg:w-72 glass-panel rounded-2xl p-4 flex flex-col justify-between overflow-y-auto space-y-4 border border-white/10 shrink-0">
+      <div className="w-full 2xl:w-64 glass-panel rounded-2xl p-4 flex flex-col justify-between overflow-y-auto space-y-4 border border-white/10 shrink-0">
         <div className="space-y-4">
           <div className="flex items-center justify-between border-b border-white/10 pb-3">
             <h2 className="text-sm font-bold text-white flex items-center space-x-2">
               <Code2 className="w-4 h-4 text-amber-400" />
-              <span>Prompt Library</span>
+              <span>Session prompts</span>
             </h2>
             <button
               onClick={() => setCreateModalOpen(true)}
@@ -154,7 +135,7 @@ export default function PromptStudioPage() {
       {/* Main Monaco Code Editor Area */}
       <div className="flex-1 glass-panel rounded-2xl flex flex-col justify-between overflow-hidden border border-white/10">
         {/* Editor Toolbar */}
-        <div className="px-6 py-3.5 border-b border-white/10 bg-zinc-950/80 flex items-center justify-between">
+        <div className="px-4 py-3.5 border-b border-white/10 bg-zinc-950/80 flex flex-wrap gap-3 items-center justify-between">
           <div className="flex items-center space-x-3">
             <FileCode className="w-5 h-5 text-amber-400" />
             <div>
@@ -176,44 +157,32 @@ export default function PromptStudioPage() {
             </button>
             <button
               onClick={handleTestPrompt}
-              disabled={testing}
-              className="px-4 py-1.5 rounded-xl bg-gradient-to-r from-amber-500 to-orange-600 hover:from-amber-400 hover:to-orange-500 text-white font-semibold text-xs flex items-center space-x-1.5 shadow-md shadow-amber-500/20 transition-all"
+                className="px-4 py-1.5 rounded-xl bg-gradient-to-r from-amber-500 to-orange-600 hover:from-amber-400 hover:to-orange-500 text-white font-semibold text-xs flex items-center space-x-1.5 shadow-md shadow-amber-500/20 transition-all"
             >
               <Play className="w-3.5 h-3.5 fill-current" />
-              <span>{testing ? 'Testing...' : 'Test Execution'}</span>
+              <span>Preview prompt</span>
             </button>
           </div>
         </div>
 
-        {/* Monaco Editor Container */}
-        <div className="flex-1 w-full bg-[#1e1e1e] relative">
-          <Editor
-            height="100%"
-            defaultLanguage="markdown"
-            theme="vs-dark"
-            value={editorText}
-            onChange={(val) => setEditorText(val || '')}
-            options={{
-              fontSize: 13,
-              minimap: { enabled: false },
-              wordWrap: 'on',
-              lineNumbers: 'on',
-              scrollBeyondLastLine: false,
-              padding: { top: 12 },
-            }}
-          />
-        </div>
+        <textarea
+          aria-label="Prompt template"
+          rows={14}
+          value={editorText}
+          onChange={(event) => { setEditorText(event.target.value); setTestResult(null); }}
+          className="min-h-72 w-full flex-1 resize-y bg-zinc-950/50 p-4 font-mono text-sm leading-relaxed"
+        />
 
         {/* Test Output Panel if generated */}
-        {testResult && (
+        {testResult !== null && (
           <div className="p-4 border-t border-white/10 bg-zinc-950 text-xs font-mono text-emerald-400 max-h-40 overflow-y-auto whitespace-pre-wrap">
-            {testResult}
+            {testResult || "This prompt is empty."}
           </div>
         )}
       </div>
 
       {/* Right Variable Inspector */}
-      <div className="w-full lg:w-80 glass-panel rounded-2xl p-4 flex flex-col justify-between overflow-y-auto space-y-4 border border-white/10 shrink-0">
+      <div className="w-full 2xl:w-72 glass-panel rounded-2xl p-4 flex flex-col justify-between overflow-y-auto space-y-4 border border-white/10 shrink-0">
         <div>
           <div className="flex items-center justify-between border-b border-white/10 pb-3">
             <h3 className="text-xs font-bold text-white uppercase tracking-wider flex items-center space-x-2">
@@ -230,6 +199,7 @@ export default function PromptStudioPage() {
                   {`{{ ${v} }}`}
                 </label>
                 <textarea
+                  aria-label={v}
                   rows={2}
                   value={testVariables[v] || ''}
                   onChange={(e) =>

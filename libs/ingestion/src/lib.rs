@@ -363,6 +363,18 @@ where
             path: path.to_path_buf(),
         });
 
+        let mut parsed = self.parser.parse_path(path)?;
+        parsed
+            .metadata
+            .insert("source_path".to_string(), json!(path.display().to_string()));
+
+        self.ingest_parsed(parsed).await
+    }
+
+    pub async fn ingest_parsed(
+        &self,
+        mut parsed: ParsedDocument,
+    ) -> Result<IngestionResult, ContextraError> {
         if self.options.embedding_batch_size == 0 {
             return Err(ContextraError::Validation(
                 "embedding_batch_size must be greater than zero".to_string(),
@@ -375,15 +387,15 @@ where
                 .await?;
         }
 
-        let mut parsed = self.parser.parse_path(path)?;
-        parsed
-            .metadata
-            .insert("source_path".to_string(), json!(path.display().to_string()));
         self.emit(IngestionProgress::Parsed {
             bytes: parsed.content.len(),
         });
 
         let document_id = DocumentId::new();
+        let chunks = self.chunker.chunk(document_id, &parsed)?;
+        parsed
+            .metadata
+            .insert("chunks_count".to_string(), json!(chunks.len()));
         let document = Document {
             id: document_id,
             collection_id: self.collection_id,
@@ -391,7 +403,6 @@ where
             metadata: parsed.metadata.clone(),
         };
 
-        let chunks = self.chunker.chunk(document_id, &parsed)?;
         self.emit(IngestionProgress::Chunked {
             chunks: chunks.len(),
         });

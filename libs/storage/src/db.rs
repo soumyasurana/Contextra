@@ -9,8 +9,21 @@ pub struct PgPool {
 
 impl PgPool {
     pub async fn connect(database_url: &str) -> Result<Self, ContextraError> {
+        Self::connect_with_limit(database_url, 5).await
+    }
+
+    pub async fn connect_with_limit(
+        database_url: &str,
+        max_connections: u32,
+    ) -> Result<Self, ContextraError> {
+        if max_connections == 0 {
+            return Err(ContextraError::Validation(
+                "database max_connections must be positive".into(),
+            ));
+        }
+
         let pool = PgPoolOptions::new()
-            .max_connections(5)
+            .max_connections(max_connections)
             .acquire_timeout(Duration::from_secs(3))
             .connect(database_url)
             .await

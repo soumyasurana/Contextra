@@ -1,25 +1,18 @@
 'use client';
 
-import React, { useState } from 'react';
+import React from 'react';
 import Link from 'next/link';
 import { motion } from 'framer-motion';
 import {
   Cpu,
-  Zap,
   ArrowRight,
   FileText,
   GitMerge,
   BrainCircuit,
   Code2,
   BarChart3,
-  Layers,
-  ShieldCheck,
   Sparkles,
-  Server,
-  Database,
-  Terminal,
   Play,
-  CheckCircle2,
 } from 'lucide-react';
 
 function GithubIcon(props: React.SVGProps<SVGSVGElement>) {
@@ -32,24 +25,6 @@ function GithubIcon(props: React.SVGProps<SVGSVGElement>) {
 }
 
 export default function LandingPage() {
-  const [demoQuery, setDemoQuery] = useState('How does Contextra manage token budgets in memory?');
-  const [demoResponse, setDemoResponse] = useState<string | null>(null);
-  const [demoLoading, setDemoLoading] = useState(false);
-
-  const handleRunDemo = (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!demoQuery.trim() || demoLoading) return;
-    setDemoLoading(true);
-    setDemoResponse(null);
-
-    setTimeout(() => {
-      setDemoResponse(
-        `[Context Assembler]: Retrieved 4 chunks from Qdrant vector store (Recall@5: 96.2%).\n[Memory Manager]: Compressed conversation log down to 2.4KB summary.\n\nContextra packs system prompt, dynamic rolling memory, and reranked context into an optimized prompt tree bounded by your model's max token window.`
-      );
-      setDemoLoading(false);
-    }, 1000);
-  };
-
   const featureCards = [
     {
       title: 'Document Ingestion',
@@ -66,13 +41,13 @@ export default function LandingPage() {
     {
       title: 'Conversation Memory',
       icon: BrainCircuit,
-      desc: 'Importance-scoring recency decay algorithm and rolling summarization for infinite long-term chat memory.',
+      desc: 'Importance-scoring recency decay algorithm and rolling summarization for long-running conversation context.',
       color: 'from-purple-500 to-pink-600',
     },
     {
       title: 'Prompt Management',
       icon: Code2,
-      desc: 'Handlebars templating engine, version control, Monaco code editor, and variable preview playground.',
+      desc: 'A prompt editor with variable substitution and rendered previews.',
       color: 'from-pink-500 to-rose-600',
     },
     {
@@ -84,7 +59,7 @@ export default function LandingPage() {
     {
       title: 'Rust High-Performance Engine',
       icon: Cpu,
-      desc: 'Written in pure Rust with Tokio async runtime, Axum REST Gateway, and zero-cost abstractions for sub-100ms latency.',
+      desc: 'Built in Rust with Tokio async runtime, Axum REST Gateway, and modular retrieval and ingestion libraries.',
       color: 'from-amber-500 to-emerald-600',
     },
   ];
@@ -143,7 +118,7 @@ export default function LandingPage() {
         >
           <div className="inline-flex items-center space-x-2 px-3.5 py-1.5 rounded-full bg-indigo-500/10 border border-indigo-500/20 text-xs font-semibold text-indigo-300">
             <Sparkles className="w-3.5 h-3.5 text-indigo-400" />
-            <span>Production-Grade Rust AI Context Engine</span>
+            <span>Rust AI context engine</span>
           </div>
 
           <h1 className="text-5xl sm:text-7xl font-extrabold tracking-tight text-white leading-tight">
@@ -155,7 +130,7 @@ export default function LandingPage() {
           </p>
 
           <p className="text-base sm:text-lg text-zinc-400 max-w-3xl mx-auto font-sans leading-relaxed">
-            Build production-ready AI applications with document ingestion, hybrid retrieval, conversation memory, prompt management, and multi-provider LLM orchestration.
+            Build AI workflows with document ingestion, hybrid retrieval, conversation memory, prompt management, and multi-provider LLM orchestration.
           </p>
         </motion.div>
 
@@ -189,46 +164,18 @@ export default function LandingPage() {
       {/* Embedded Live Interactive Demo Section */}
       <section className="max-w-4xl mx-auto px-6 py-12 relative z-10">
         <div className="glass-panel rounded-3xl p-6 md:p-8 border border-white/10 shadow-2xl space-y-6 bg-zinc-950/80">
-          <div className="flex items-center justify-between border-b border-white/10 pb-4">
-            <div className="flex items-center space-x-3">
-              <div className="w-3 h-3 rounded-full bg-rose-500" />
-              <div className="w-3 h-3 rounded-full bg-amber-500" />
-              <div className="w-3 h-3 rounded-full bg-emerald-500" />
-              <span className="text-xs font-mono text-zinc-400 pl-2">Contextra Engine Playground Demo</span>
+          <h2 className="text-base font-semibold text-white">Sample context trace</h2>
+          <details className="rounded-xl border border-white/10 bg-zinc-900/80">
+            <summary className="flex cursor-pointer list-none items-center gap-2 px-4 py-3 text-sm text-indigo-200">
+              <Play className="size-4" />
+              How can Contextra fit conversation history into a token budget?
+            </summary>
+            <div className="space-y-2 border-t border-white/10 px-4 py-3 text-sm leading-relaxed text-zinc-300">
+              <p><strong className="text-white">Retrieval.</strong> Find relevant chunks and rank them by relevance.</p>
+              <p><strong className="text-white">Memory.</strong> Summarize older turns and keep recent messages.</p>
+              <p><strong className="text-white">Assembly.</strong> Select context that fits the available prompt budget.</p>
             </div>
-            <span className="text-xs font-mono text-emerald-400 font-semibold flex items-center space-x-1">
-              <CheckCircle2 className="w-3.5 h-3.5" />
-              <span>Rust Gateway Ready</span>
-            </span>
-          </div>
-
-          <form onSubmit={handleRunDemo} className="flex gap-3">
-            <input
-              type="text"
-              value={demoQuery}
-              onChange={(e) => setDemoQuery(e.target.value)}
-              placeholder="Test a context engineering query..."
-              className="flex-1 px-4 py-3 bg-zinc-900 border border-white/10 rounded-xl text-sm text-zinc-100 placeholder-zinc-500 focus:outline-none focus:border-indigo-500/50 font-sans"
-            />
-            <button
-              type="submit"
-              disabled={demoLoading}
-              className="px-6 py-3 rounded-xl bg-indigo-600 hover:bg-indigo-500 text-white font-semibold text-sm flex items-center space-x-2 transition-all shadow-md shrink-0"
-            >
-              <Play className="w-4 h-4 fill-current" />
-              <span>{demoLoading ? 'Processing...' : 'Run Query'}</span>
-            </button>
-          </form>
-
-          {demoResponse && (
-            <motion.div
-              initial={{ opacity: 0, y: 10 }}
-              animate={{ opacity: 1, y: 0 }}
-              className="p-4 rounded-xl bg-zinc-900 border border-emerald-500/30 text-xs font-mono text-emerald-300 leading-relaxed whitespace-pre-wrap shadow-inner"
-            >
-              {demoResponse}
-            </motion.div>
-          )}
+          </details>
         </div>
       </section>
 
@@ -237,7 +184,7 @@ export default function LandingPage() {
         <div className="text-center space-y-3">
           <h2 className="text-3xl font-bold tracking-tight text-white">Platform Capabilities</h2>
           <p className="text-sm text-zinc-400 max-w-xl mx-auto">
-            Everything required to manage the context lifecycle for enterprise LLM systems.
+            Libraries and workspace tools for building AI applications.
           </p>
         </div>
 

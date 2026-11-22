@@ -256,3 +256,42 @@ fn test_job_with_incremented_retry_preserves_id() {
     assert_eq!(retried.retry_count, 1);
     assert_eq!(retried.scheduled_at, 9999);
 }
+
+#[tokio::test]
+async fn redis_queue_respects_schedule_and_retry() -> Result<(), Box<dyn std::error::Error>> {
+    let Ok(url) = std::env::var("CONTEXTRA_TEST_REDIS_URL") else {
+        return Ok(());
+    };
+    let queue = crate::queue::RedisJobQueue::connect(&url).await?;
+    let ready = sweep_job();
+    let delayed = Job::scheduled(
+        JobKind::MemorySweep,
+        serde_json::json!({}),
+        ready.scheduled_at + 2,
+    );
+
+    queue.enqueue(&delayed).await?;
+    queue.enqueue(&ready).await?;
+    let claimed = queue
+        .dequeue(Duration::ZERO)
+        .await?
+        .ok_or("missing ready job")?;
+    assert_eq!(claimed.id, ready.id);
+    queue.nack(&claimed).await?;
+    assert!(queue.dequeue(Duration::ZERO).await?.is_none());
+
+    let claimed = queue
+        .dequeue(Duration::from_secs(3))
+        .await?
+        .ok_or("missing scheduled job")?;
+    assert_eq!(claimed.id, delayed.id);
+    queue.ack(&claimed.id.to_string()).await?;
+    let retried = queue
+        .dequeue(Duration::from_secs(5))
+        .await?
+        .ok_or("missing scheduled retry")?;
+    assert_eq!((retried.id, retried.retry_count), (ready.id, 1));
+    queue.ack(&retried.id.to_string()).await?;
+    assert!(queue.dequeue(Duration::ZERO).await?.is_none());
+    Ok(())
+}

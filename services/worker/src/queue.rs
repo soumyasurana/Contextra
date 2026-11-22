@@ -1,5 +1,5 @@
 use async_trait::async_trait;
-use redis::{AsyncCommands, Client};
+use redis::{AsyncCommands, Client, Script};
 use std::collections::VecDeque;
 use std::sync::Arc;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
@@ -51,7 +51,7 @@ pub trait JobQueue: Send + Sync {
     async fn dequeue(&self, timeout: Duration) -> Result<Option<Job>, WorkerError>;
 
     /// Acknowledge successful processing — remove the job from the in-flight
-    /// tracking set so it is not replayed on restart.
+    /// tracking list.
     async fn ack(&self, job_id: &str) -> Result<(), WorkerError>;
 
     /// Negatively acknowledge a failed job.
@@ -68,8 +68,10 @@ pub trait JobQueue: Send + Sync {
 
 /// Jobs waiting to be picked up by a worker.
 const QUEUE_KEY: &str = "worker:queue";
-/// Jobs currently being processed (used for at-least-once delivery).
+/// Jobs currently being processed.
 const PROCESSING_KEY: &str = "worker:processing";
+/// Jobs waiting for their scheduled time.
+const DELAYED_KEY: &str = "worker:delayed";
 /// Jobs that exceeded `MAX_RETRIES` and need manual intervention.
 const DLQ_KEY: &str = "worker:dlq";
 
@@ -77,103 +79,144 @@ const DLQ_KEY: &str = "worker:dlq";
 // RedisJobQueue
 // ---------------------------------------------------------------------------
 
-/// Production Redis-backed job queue.
-///
-/// Uses a dedicated async connection (not the shared `RedisCache` multiplexed
-/// connection) so that the blocking `BLPOP` call does not starve other Redis
-/// operations.
+/// Redis-backed queue with atomic claims and retry transitions.
 pub struct RedisJobQueue {
-    /// A connection used exclusively for blocking dequeue operations.
-    dequeue_conn: Arc<Mutex<redis::aio::MultiplexedConnection>>,
-    /// A separate connection used for non-blocking enqueue / ack / nack.
-    cmd_conn: Arc<Mutex<redis::aio::MultiplexedConnection>>,
+    connection: redis::aio::MultiplexedConnection,
 }
 
 impl RedisJobQueue {
-    /// Connect to Redis at `url` and return a ready `RedisJobQueue`.
     pub async fn connect(url: &str) -> Result<Self, WorkerError> {
         let client = Client::open(url)
-            .map_err(|e| WorkerError::Queue(format!("failed to open Redis client: {e}")))?;
-
-        let dequeue_conn = client
+            .map_err(|error| WorkerError::Queue(format!("failed to open Redis client: {error}")))?;
+        let connection = client
             .get_multiplexed_async_connection()
             .await
-            .map_err(|e| {
-                WorkerError::Queue(format!("failed to connect to Redis (dequeue): {e}"))
-            })?;
-
-        let cmd_conn = client
-            .get_multiplexed_async_connection()
-            .await
-            .map_err(|e| WorkerError::Queue(format!("failed to connect to Redis (cmd): {e}")))?;
-
-        Ok(Self {
-            dequeue_conn: Arc::new(Mutex::new(dequeue_conn)),
-            cmd_conn: Arc::new(Mutex::new(cmd_conn)),
-        })
+            .map_err(|error| WorkerError::Queue(format!("failed to connect to Redis: {error}")))?;
+        Ok(Self { connection })
     }
 }
+
+// Move jobs atomically into the processing list. Inspect the ready list for
+// delayed entries produced by older workers and move them to the sorted set.
+const CLAIM_JOB: &str = r#"
+local now = tonumber(redis.call('TIME')[1])
+local due = redis.call('ZRANGEBYSCORE', KEYS[2], '-inf', now, 'LIMIT', 0, 1)
+if due[1] then
+    redis.call('RPUSH', KEYS[3], due[1])
+    redis.call('ZREM', KEYS[2], due[1])
+    return due[1]
+end
+for i = 1, 32 do
+    local raw = redis.call('LINDEX', KEYS[1], 0)
+    if not raw then return nil end
+    local ok, job = pcall(cjson.decode, raw)
+    if not ok or type(job) ~= 'table' or type(job.scheduled_at) ~= 'number' or type(job.id) ~= 'string' then
+        redis.call('RPUSH', KEYS[4], raw)
+    elseif job.scheduled_at > now then
+        redis.call('ZADD', KEYS[2], job.scheduled_at, raw)
+    else
+        redis.call('RPUSH', KEYS[3], raw)
+        redis.call('LPOP', KEYS[1])
+        return raw
+    end
+    redis.call('LPOP', KEYS[1])
+end
+return nil
+"#;
+
+// Move the failed attempt before removing it from processing. Match the
+// attempt as well as the ID so repeating a failed transition is harmless.
+const FAIL_JOB: &str = r#"
+for _, raw in ipairs(redis.call('LRANGE', KEYS[1], 0, -1)) do
+    local ok, job = pcall(cjson.decode, raw)
+    if ok and type(job) == 'table' and job.id == ARGV[1] and job.retry_count == tonumber(ARGV[2]) then
+        if ARGV[3] == 'retry' then
+            redis.call('ZADD', KEYS[2], ARGV[4], ARGV[5])
+        else
+            redis.call('RPUSH', KEYS[3], ARGV[5])
+        end
+        return redis.call('LREM', KEYS[1], 1, raw)
+    end
+end
+return 0
+"#;
 
 #[async_trait]
 impl JobQueue for RedisJobQueue {
     async fn enqueue(&self, job: &Job) -> Result<(), WorkerError> {
         let serialized = serde_json::to_string(job)?;
-        let mut conn = self.cmd_conn.lock().await;
-        let _: i64 = conn
-            .rpush(QUEUE_KEY, &serialized)
+        let mut connection = self.connection.clone();
+        let _: i64 = connection
+            .rpush(QUEUE_KEY, serialized)
             .await
-            .map_err(|e| WorkerError::Queue(format!("RPUSH failed: {e}")))?;
+            .map_err(|error| WorkerError::Queue(format!("failed to enqueue job: {error}")))?;
         Ok(())
     }
 
     async fn dequeue(&self, timeout: Duration) -> Result<Option<Job>, WorkerError> {
-        let timeout_secs = timeout.as_secs_f64();
-        let mut conn = self.dequeue_conn.lock().await;
+        let deadline = tokio::time::Instant::now() + timeout;
+        let mut connection = self.connection.clone();
+        let script = Script::new(CLAIM_JOB);
 
-        // BLPOP returns Option<(key, value)>
-        let result: Option<(String, String)> = conn
-            .blpop(QUEUE_KEY, timeout_secs)
-            .await
-            .map_err(|e| WorkerError::Queue(format!("BLPOP failed: {e}")))?;
-
-        let Some((_, raw)) = result else {
-            return Ok(None);
-        };
-
-        let job: Job = serde_json::from_str(&raw)?;
-
-        // Move to the in-flight tracking list for at-least-once semantics.
-        {
-            let mut cmd = self.cmd_conn.lock().await;
-            let _: i64 = cmd
-                .rpush(PROCESSING_KEY, &raw)
+        loop {
+            let raw: Option<String> = script
+                .key(QUEUE_KEY)
+                .key(DELAYED_KEY)
+                .key(PROCESSING_KEY)
+                .key(DLQ_KEY)
+                .invoke_async(&mut connection)
                 .await
-                .map_err(|e| WorkerError::Queue(format!("RPUSH processing failed: {e}")))?;
-        }
+                .map_err(|error| WorkerError::Queue(format!("failed to claim job: {error}")))?;
+            if let Some(raw) = raw {
+                return match serde_json::from_str(&raw) {
+                    Ok(job) => Ok(Some(job)),
+                    Err(error) => {
+                        let _: () = redis::pipe()
+                            .atomic()
+                            .rpush(DLQ_KEY, &raw)
+                            .ignore()
+                            .lrem(PROCESSING_KEY, 1, &raw)
+                            .ignore()
+                            .query_async(&mut connection)
+                            .await
+                            .map_err(|error| {
+                                WorkerError::Queue(format!(
+                                    "failed to dead-letter invalid job: {error}"
+                                ))
+                            })?;
+                        Err(error.into())
+                    }
+                };
+            }
 
-        Ok(Some(job))
+            let remaining = deadline.saturating_duration_since(tokio::time::Instant::now());
+            if remaining.is_zero() {
+                return Ok(None);
+            }
+            tokio::time::sleep(remaining.min(Duration::from_millis(200))).await;
+        }
     }
 
     async fn ack(&self, job_id: &str) -> Result<(), WorkerError> {
-        // We stored the raw JSON in the processing list; we need to remove by
-        // job id. The cleanest approach without a second copy is to scan the
-        // processing list, find the entry matching the id, and remove it.
-        // For simplicity we use LRANGE + LREM with a pattern-less match.
-        let mut conn = self.cmd_conn.lock().await;
-        let entries: Vec<String> = conn
-            .lrange(PROCESSING_KEY, 0, -1)
-            .await
-            .map_err(|e| WorkerError::Queue(format!("LRANGE failed: {e}")))?;
+        let mut connection = self.connection.clone();
+        let entries: Vec<String> =
+            connection
+                .lrange(PROCESSING_KEY, 0, -1)
+                .await
+                .map_err(|error| {
+                    WorkerError::Queue(format!("failed to read processing list: {error}"))
+                })?;
 
         for entry in entries {
-            // Parse enough to check the id without full deserialization errors
             if let Ok(partial) = serde_json::from_str::<serde_json::Value>(&entry)
-                && partial.get("id").and_then(|v| v.as_str()) == Some(job_id)
+                && partial.get("id").and_then(|value| value.as_str()) == Some(job_id)
             {
-                let _: i64 = conn
-                    .lrem(PROCESSING_KEY, 1, &entry)
+                let _: i64 = connection
+                    .lrem(PROCESSING_KEY, 1, entry)
                     .await
-                    .map_err(|e| WorkerError::Queue(format!("LREM ack failed: {e}")))?;
+                    .map_err(|error| {
+                        WorkerError::Queue(format!("failed to acknowledge job: {error}"))
+                    })?;
                 break;
             }
         }
@@ -181,41 +224,26 @@ impl JobQueue for RedisJobQueue {
     }
 
     async fn nack(&self, job: &Job) -> Result<(), WorkerError> {
-        // Remove from the in-flight list first.
-        self.ack(&job.id.to_string()).await?;
-
-        if job.retry_count >= MAX_RETRIES {
-            // Dead-letter the job.
-            let serialized = serde_json::to_string(job)?;
-            let mut conn = self.cmd_conn.lock().await;
-            let _: i64 = conn
-                .rpush(DLQ_KEY, &serialized)
-                .await
-                .map_err(|e| WorkerError::Queue(format!("RPUSH DLQ failed: {e}")))?;
-            tracing::warn!(
-                job_id = %job.id,
-                job_type = job.kind.as_str(),
-                retry_count = job.retry_count,
-                "job exceeded max retries, dead-lettered"
-            );
+        let retry = job.retry_count < MAX_RETRIES;
+        let next = if retry {
+            job.with_incremented_retry(next_scheduled_at(job.retry_count))
         } else {
-            // Re-enqueue with incremented retry and backoff.
-            let next_at = next_scheduled_at(job.retry_count);
-            let retry_job = job.with_incremented_retry(next_at);
-            let serialized = serde_json::to_string(&retry_job)?;
-            let mut conn = self.cmd_conn.lock().await;
-            let _: i64 = conn
-                .rpush(QUEUE_KEY, &serialized)
-                .await
-                .map_err(|e| WorkerError::Queue(format!("RPUSH retry failed: {e}")))?;
-            tracing::info!(
-                job_id = %retry_job.id,
-                job_type = retry_job.kind.as_str(),
-                retry_count = retry_job.retry_count,
-                "job re-enqueued for retry"
-            );
-        }
-
+            job.clone()
+        };
+        let _: i64 = Script::new(FAIL_JOB)
+            .key(PROCESSING_KEY)
+            .key(DELAYED_KEY)
+            .key(DLQ_KEY)
+            .arg(job.id.to_string())
+            .arg(job.retry_count)
+            .arg(if retry { "retry" } else { "dead-letter" })
+            .arg(next.scheduled_at)
+            .arg(serde_json::to_string(&next)?)
+            .invoke_async(&mut self.connection.clone())
+            .await
+            .map_err(|error| {
+                WorkerError::Queue(format!("failed to reschedule failed job: {error}"))
+            })?;
         Ok(())
     }
 }

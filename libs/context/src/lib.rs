@@ -2,7 +2,7 @@ use async_trait::async_trait;
 use errors::ContextraError;
 use memory::{LongTermMemory, MemoryStore};
 use prompts::{OptimizedPromptContext, PromptBuilder, PromptOptimizer};
-use providers::{ChatRequest, ChatResponse, LLMProvider};
+use providers::{ChatMessage, ChatRequest, ChatResponse, LLMProvider};
 use retrieval::{RankedChunk, RetrievalRequest, Retriever};
 use serde::{Deserialize, Serialize};
 use std::cmp::Ordering;
@@ -352,7 +352,11 @@ where
     where
         P: LLMProvider,
     {
-        let package = self.assemble(request).await?;
+        let mut package = self.assemble(request).await?;
+        package
+            .chat_request
+            .messages
+            .push(ChatMessage::user(package.query.clone()));
         let response = provider
             .chat(package.chat_request.clone())
             .await
@@ -562,6 +566,12 @@ mod tests {
         let captured = provider.captured.lock().unwrap();
         let sent = captured.as_ref().unwrap();
         assert_eq!(sent.model, "provider-model");
+        assert_eq!(
+            sent.messages
+                .last()
+                .and_then(|message| message.content.as_deref()),
+            Some("run")
+        );
         assert!(sent.messages.iter().any(|message| {
             message
                 .content

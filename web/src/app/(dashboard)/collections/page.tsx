@@ -8,7 +8,6 @@ import {
   FileText,
   Layers,
   Edit2,
-  Trash2,
   Search,
   X,
   RefreshCw,
@@ -19,7 +18,7 @@ import { api } from '@/lib/api';
 import { toast } from 'sonner';
 
 export default function CollectionsPage() {
-  const { collections, collectionsLoading, settings, fetchCollections, addCollection, deleteCollection, updateCollection } = useAppStore();
+  const { collections, collectionsLoading, settings, fetchCollections, collectionsError } = useAppStore();
   const [searchQuery, setSearchQuery] = useState('');
   const [createModalOpen, setCreateModalOpen] = useState(false);
   const [editingCol, setEditingCol] = useState<CollectionResource | null>(null);
@@ -46,34 +45,15 @@ export default function CollectionsPage() {
     setIsSubmitting(true);
     try {
       if (editingCol) {
-        updateCollection(editingCol.id, name, description);
-        toast.success(`Updated collection "${name}"`);
-        setEditingCol(null);
+        await api.updateCollection(editingCol.id, name.trim(), { description: description.trim() }, settings.api_key, settings.gateway_url);
       } else {
-        const created = await api.createCollection(name, { description }, settings.api_key);
-        if (created) {
-          addCollection(created);
-          toast.success(`Created collection "${name}"`);
-        } else {
-          // Fallback local creation if backend offline
-          const newCol: CollectionResource = {
-            id: `col_${Date.now()}`,
-            name,
-            description,
-            documents_count: 0,
-            chunks_count: 0,
-            created_at: new Date().toISOString().split('T')[0],
-          };
-          addCollection(newCol);
-          toast.success(`Created collection "${name}" (local)`);
-        }
+        await api.createCollection(name.trim(), { description: description.trim() }, settings.api_key, settings.gateway_url);
       }
-
-      setName('');
-      setDescription('');
+      toast.success(`${editingCol ? 'Updated' : 'Created'} collection "${name.trim()}"`);
       setCreateModalOpen(false);
-    } catch {
-      toast.error('Failed to create collection');
+      await fetchCollections();
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : 'Failed to save collection.');
     } finally {
       setIsSubmitting(false);
     }
@@ -96,13 +76,14 @@ export default function CollectionsPage() {
             <span>Document Collections</span>
           </h1>
           <p className="text-sm text-zinc-400 mt-1">
-            Group vector indexes by domain, access policies, and embedding models.
+            Group related documents in their own vector index.
           </p>
         </div>
 
         <div className="flex items-center space-x-3">
           <button
             onClick={() => fetchCollections()}
+            disabled={collectionsLoading}
             className="px-3.5 py-2.5 rounded-xl glass-card text-xs text-zinc-300 hover:text-white flex items-center space-x-2 transition-colors"
           >
             <RefreshCw className={`w-4 h-4 ${collectionsLoading ? 'animate-spin' : ''}`} />
@@ -131,6 +112,7 @@ export default function CollectionsPage() {
             type="text"
             value={searchQuery}
             onChange={(e) => setSearchQuery(e.target.value)}
+            aria-label="Filter collections"
             placeholder="Filter collections..."
             className="w-full pl-9 pr-4 py-2 bg-zinc-900/80 border border-white/10 rounded-xl text-sm text-zinc-100 placeholder-zinc-500 focus:outline-none focus:border-purple-500/50"
           />
@@ -138,7 +120,9 @@ export default function CollectionsPage() {
       </div>
 
       {/* Collection Grid */}
-      {collectionsLoading ? (
+      {collectionsError ? (
+        <p role="alert" className="glass-panel rounded-2xl p-6 text-sm text-rose-300">{collectionsError} Select Sync to retry.</p>
+      ) : collectionsLoading ? (
         <div className="p-12 text-center text-zinc-400 text-sm flex items-center justify-center space-x-2">
           <RefreshCw className="w-4 h-4 animate-spin text-purple-400" />
           <span>Loading collections from backend...</span>
@@ -146,8 +130,8 @@ export default function CollectionsPage() {
       ) : filteredCollections.length === 0 ? (
         <div className="glass-panel rounded-2xl p-12 text-center text-zinc-500 space-y-3">
           <FolderArchive className="w-12 h-12 text-zinc-600 mx-auto" />
-          <p className="text-sm font-semibold text-zinc-300">No collections available</p>
-          <p className="text-xs text-zinc-500">Create a collection to organize your vector embeddings.</p>
+          <p className="text-sm font-semibold text-zinc-300">{searchQuery ? "No matching collections" : "No collections yet"}</p>
+          <p className="text-xs text-zinc-500">{searchQuery ? "Try a different search." : "Create a collection to organize your documents."}</p>
         </div>
       ) : (
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
@@ -156,7 +140,7 @@ export default function CollectionsPage() {
               key={col.id}
               initial={{ opacity: 0, y: 15 }}
               animate={{ opacity: 1, y: 0 }}
-              transition={{ duration: 0.2, delay: idx * 0.05 }}
+              transition={{ duration: 0.2, delay: Math.min(idx, 8) * 0.03 }}
               className="glass-card glass-card-hover rounded-2xl p-6 flex flex-col justify-between space-y-4 group relative"
             >
               <div className="space-y-3">
@@ -165,28 +149,14 @@ export default function CollectionsPage() {
                     <FolderArchive className="w-5 h-5" />
                   </div>
 
-                  <div className="flex items-center space-x-1 opacity-0 group-hover:opacity-100 transition-opacity">
+                  <div className="flex items-center space-x-1">
                     <button
                       onClick={() => openEdit(col)}
                       className="p-1.5 rounded-lg text-zinc-400 hover:text-white hover:bg-zinc-800"
-                      title="Rename / Edit"
+                      aria-label={`Edit ${col.name}`}
+                      title="Edit collection"
                     >
                       <Edit2 className="w-3.5 h-3.5" />
-                    </button>
-                    <button
-                      onClick={async () => {
-                        const ok = await api.deleteCollection(col.id, settings.api_key, settings.gateway_url);
-                        if (ok) {
-                          deleteCollection(col.id);
-                          toast.success(`Deleted collection "${col.name}"`);
-                        } else {
-                          toast.error(`Failed to delete collection "${col.name}"`);
-                        }
-                      }}
-                      className="p-1.5 rounded-lg text-zinc-400 hover:text-rose-400 hover:bg-rose-900/40"
-                      title="Delete"
-                    >
-                      <Trash2 className="w-3.5 h-3.5" />
                     </button>
                   </div>
                 </div>

@@ -2182,6 +2182,7 @@ mod tests {
     fn factory_and_registry_create_configured_providers_from_settings()
     -> Result<(), Box<dyn std::error::Error>> {
         let settings = ProvidersSettings {
+            model: None,
             provider: Some("anthropic".to_string()),
             openai_api_key: Some("test-key".to_string()),
             anthropic_api_key: Some("test-key".to_string()),

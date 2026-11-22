@@ -60,7 +60,7 @@ impl GatewayService for MockE2eGatewayService {
         let doc = DocumentResource {
             id: Uuid::now_v7().to_string(),
             collection_id: Uuid::now_v7().to_string(),
-            content: format!("Content from {}", request.source_path),
+            content: request.source_path,
             metadata: types::Metadata::new(),
         };
         self.documents.lock().unwrap().push(doc.clone());
@@ -175,9 +175,12 @@ async fn test_gateway_rest_ingest_and_chat_roundtrip() -> Result<(), Box<dyn std
     let client = GatewayClient::new(base_url, Some("test-token".to_string()));
 
     // 1. Ingest document via REST
-    let doc = client.ingest_document("/tmp/sample_doc.txt", None).await?;
+    let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../fixtures/sample.txt");
+    let doc = client
+        .ingest_document(path.to_str().ok_or("invalid fixture path")?, None)
+        .await?;
     assert!(!doc.id.is_empty());
-    assert!(doc.content.contains("/tmp/sample_doc.txt"));
+    assert_eq!(doc.content, include_str!("../../fixtures/sample.txt"));
 
     // 2. Create conversation via REST
     let conv = client

@@ -5,49 +5,34 @@ import {
   ChatMessage,
 } from '@/types';
 
-export const DEFAULT_GATEWAY_URL =
-  process.env.NEXT_PUBLIC_GATEWAY_URL &&
-  process.env.NEXT_PUBLIC_GATEWAY_URL !== 'https://contextra.blocklogsecurity.com'
-    ? process.env.NEXT_PUBLIC_GATEWAY_URL
-    : '';
+export const DEFAULT_GATEWAY_URL = process.env.NEXT_PUBLIC_GATEWAY_URL ?? '';
 
 export function getBaseUrl(gatewayUrl?: string): string {
-  if (
-    gatewayUrl &&
-    gatewayUrl.trim() &&
-    gatewayUrl !== 'https://contextra.blocklogsecurity.com'
-  ) {
-    return gatewayUrl.replace(/\/+$/, '');
-  }
-  if (
-    DEFAULT_GATEWAY_URL &&
-    DEFAULT_GATEWAY_URL !== 'https://contextra.blocklogsecurity.com'
-  ) {
-    return DEFAULT_GATEWAY_URL.replace(/\/+$/, '');
-  }
-  return '';
+  return (gatewayUrl?.trim() || DEFAULT_GATEWAY_URL.trim()).replace(/\/+$/, '');
 }
 
-/** Kept for backwards-compat with components that read the env URL for display */
-export const GATEWAY_URL = DEFAULT_GATEWAY_URL;
-
-async function fetchWithTimeout(url: string, options: RequestInit = {}, timeoutMs = 5000) {
+async function request<T>(url: string, options: RequestInit, timeoutMs = 5000): Promise<T> {
   const controller = new AbortController();
-  const id = setTimeout(() => controller.abort(), timeoutMs);
+  const timer = setTimeout(() => controller.abort(), timeoutMs);
   try {
-    const res = await fetch(url, { ...options, signal: controller.signal });
-    clearTimeout(id);
-    return res;
-  } catch (err) {
-    clearTimeout(id);
-    throw err;
+    const response = await fetch(url, { ...options, signal: controller.signal });
+    if (!response.ok) {
+      const body = await response.json().catch(() => null);
+      throw new Error(body?.error?.message || `Gateway returned HTTP ${response.status}`);
+    }
+    return await response.json() as T;
+  } catch (error) {
+    if (controller.signal.aborted) throw new Error('The gateway request timed out.');
+    if (error instanceof TypeError) throw new Error('Unable to reach the gateway.');
+    throw error;
+  } finally {
+    clearTimeout(timer);
   }
 }
 
-function authHeaders(apiKey?: string): Record<string, string> {
-  const headers: Record<string, string> = {
-    'Content-Type': 'application/json',
-  };
+function authHeaders(apiKey?: string, json = false): Record<string, string> {
+  const headers: Record<string, string> = {};
+  if (json) headers['Content-Type'] = 'application/json';
   if (apiKey) {
     headers['x-api-key'] = apiKey;
   }
@@ -151,201 +136,85 @@ function mapMessage(msg: BackendMessageResource): ChatMessage {
   };
 }
 
-// ── Public API ────────────────────────────────────────────────────────
+async function list<T>(path: string, apiKey?: string, gatewayUrl?: string) {
+  const items: T[] = [];
+  const base = getBaseUrl(gatewayUrl);
+  const cursors = new Set<string>();
+  let cursor: string | null = null;
+  do {
+    const params = new URLSearchParams({ limit: '100' });
+    if (cursor) params.set('cursor', cursor);
+    const page = await request<PageResponse<T>>(`${base}${path}?${params}`, {
+      headers: authHeaders(apiKey),
+    });
+    items.push(...page.items);
+    cursor = page.has_more ? page.next_cursor : null;
+    if (cursor && cursors.has(cursor)) throw new Error('The gateway repeated a pagination cursor.');
+    if (cursor) cursors.add(cursor);
+  } while (cursor);
+  return items;
+}
+
+function post<T>(path: string, body: object, apiKey?: string, gatewayUrl?: string, timeoutMs = 15000) {
+  return request<T>(`${getBaseUrl(gatewayUrl)}${path}`, {
+    method: 'POST',
+    headers: authHeaders(apiKey, true),
+    body: JSON.stringify(body),
+  }, timeoutMs);
+}
 
 export const api = {
-  // ─── Documents ───────────────────────────────────────────────────
-  async getDocuments(apiKey?: string, gatewayUrl?: string): Promise<{ items: DocumentResource[]; totalCount: number }> {
-    const base = getBaseUrl(gatewayUrl);
-    try {
-      const res = await fetchWithTimeout(`${base}/api/v1/documents`, {
-        headers: authHeaders(apiKey),
-      });
-      if (!res.ok) throw new Error(`API ${res.status}`);
-      const data: PageResponse<BackendDocumentResource> = await res.json();
-      return {
-        items: (data.items || []).map(mapDocument),
-        totalCount: data.total_count ?? data.items?.length ?? 0,
-      };
-    } catch {
-      return { items: [], totalCount: 0 };
-    }
+  async getDocuments(apiKey?: string, gatewayUrl?: string) {
+    return (await list<BackendDocumentResource>('/api/v1/documents', apiKey, gatewayUrl)).map(mapDocument);
   },
 
-  async createDocument(sourcePath: string, apiKey?: string, gatewayUrl?: string): Promise<DocumentResource | null> {
-    const base = getBaseUrl(gatewayUrl);
-    try {
-      const res = await fetchWithTimeout(`${base}/api/v1/documents`, {
-        method: 'POST',
-        headers: authHeaders(apiKey),
-        body: JSON.stringify({ source_path: sourcePath }),
-      });
-      if (!res.ok) throw new Error('Failed to create document');
-      const data: BackendDocumentResource = await res.json();
-      return mapDocument(data);
-    } catch {
-      return null;
-    }
+  async createDocument(document: { name: string; content: string; collection_id?: string }, apiKey?: string, gatewayUrl?: string) {
+    return mapDocument(await post<BackendDocumentResource>('/api/v1/documents', document, apiKey, gatewayUrl, 60000));
   },
 
-  async deleteDocument(id: string, apiKey?: string, gatewayUrl?: string): Promise<boolean> {
-    const base = getBaseUrl(gatewayUrl);
+  async getCollections(apiKey?: string, gatewayUrl?: string) {
+    return (await list<BackendCollectionResource>('/api/v1/collections', apiKey, gatewayUrl)).map(mapCollection);
+  },
+
+  async createCollection(name: string, metadata: Record<string, unknown>, apiKey?: string, gatewayUrl?: string) {
+    return mapCollection(await post<BackendCollectionResource>('/api/v1/collections', { name, metadata }, apiKey, gatewayUrl));
+  },
+
+  async updateCollection(id: string, name: string, metadata: Record<string, unknown>, apiKey?: string, gatewayUrl?: string) {
+    const updated = await request<BackendCollectionResource>(
+      `${getBaseUrl(gatewayUrl)}/api/v1/collections/${encodeURIComponent(id)}`,
+      { method: 'PATCH', headers: authHeaders(apiKey, true), body: JSON.stringify({ name, metadata }) },
+    );
+    return mapCollection(updated);
+  },
+
+  async getConversations(apiKey?: string, gatewayUrl?: string) {
+    return (await list<BackendConversationResource>('/api/v1/conversations', apiKey, gatewayUrl)).map(mapConversation);
+  },
+
+  async createConversation(title: string, apiKey?: string, gatewayUrl?: string) {
+    return mapConversation(await post<BackendConversationResource>('/api/v1/conversations', { title }, apiKey, gatewayUrl));
+  },
+
+  async getMessages(conversationId: string, apiKey?: string, gatewayUrl?: string) {
+    const path = `/api/v1/conversations/${encodeURIComponent(conversationId)}/messages`;
+    return (await list<BackendMessageResource>(path, apiKey, gatewayUrl)).map(mapMessage);
+  },
+
+  async sendMessage(conversationId: string, message: string, apiKey?: string, gatewayUrl?: string): Promise<void> {
+    const path = `/api/v1/conversations/${encodeURIComponent(conversationId)}/messages`;
+    await post<BackendChatExecutionResponse>(path, { message }, apiKey, gatewayUrl, 60000);
+  },
+
+  async checkHealth(gatewayUrl?: string): Promise<boolean> {
     try {
-      const res = await fetchWithTimeout(`${base}/api/v1/documents/${id}`, {
-        method: 'DELETE',
-        headers: authHeaders(apiKey),
+      const response = await fetch(`${getBaseUrl(gatewayUrl)}/health`, {
+        cache: 'no-store',
+        signal: AbortSignal.timeout(5000),
       });
-      return res.ok || res.status === 404;
+      return response.ok;
     } catch {
       return false;
     }
   },
-
-  // ─── Collections ─────────────────────────────────────────────────
-  async getCollections(apiKey?: string, gatewayUrl?: string): Promise<{ items: CollectionResource[]; totalCount: number }> {
-    const base = getBaseUrl(gatewayUrl);
-    try {
-      const res = await fetchWithTimeout(`${base}/api/v1/collections`, {
-        headers: authHeaders(apiKey),
-      });
-      if (!res.ok) throw new Error(`API ${res.status}`);
-      const data: PageResponse<BackendCollectionResource> = await res.json();
-      return {
-        items: (data.items || []).map(mapCollection),
-        totalCount: data.total_count ?? data.items?.length ?? 0,
-      };
-    } catch {
-      return { items: [], totalCount: 0 };
-    }
-  },
-
-  async createCollection(name: string, metadata: Record<string, unknown> = {}, apiKey?: string, gatewayUrl?: string): Promise<CollectionResource | null> {
-    const base = getBaseUrl(gatewayUrl);
-    try {
-      const res = await fetchWithTimeout(`${base}/api/v1/collections`, {
-        method: 'POST',
-        headers: authHeaders(apiKey),
-        body: JSON.stringify({ name, metadata }),
-      });
-      if (!res.ok) throw new Error('Failed to create collection');
-      const data: BackendCollectionResource = await res.json();
-      return mapCollection(data);
-    } catch {
-      return null;
-    }
-  },
-
-  async deleteCollection(id: string, apiKey?: string, gatewayUrl?: string): Promise<boolean> {
-    const base = getBaseUrl(gatewayUrl);
-    try {
-      const res = await fetchWithTimeout(`${base}/api/v1/collections/${id}`, {
-        method: 'DELETE',
-        headers: authHeaders(apiKey),
-      });
-      return res.ok || res.status === 404;
-    } catch {
-      return false;
-    }
-  },
-
-  // ─── Conversations ───────────────────────────────────────────────
-  async getConversations(apiKey?: string, gatewayUrl?: string): Promise<{ items: ConversationResource[]; totalCount: number }> {
-    const base = getBaseUrl(gatewayUrl);
-    try {
-      const res = await fetchWithTimeout(`${base}/api/v1/conversations`, {
-        headers: authHeaders(apiKey),
-      });
-      if (!res.ok) throw new Error(`API ${res.status}`);
-      const data: PageResponse<BackendConversationResource> = await res.json();
-      return {
-        items: (data.items || []).map(mapConversation),
-        totalCount: data.total_count ?? data.items?.length ?? 0,
-      };
-    } catch {
-      return { items: [], totalCount: 0 };
-    }
-  },
-
-  async createConversation(title: string | undefined, apiKey?: string, gatewayUrl?: string): Promise<ConversationResource | null> {
-    const base = getBaseUrl(gatewayUrl);
-    try {
-      const res = await fetchWithTimeout(`${base}/api/v1/conversations`, {
-        method: 'POST',
-        headers: authHeaders(apiKey),
-        body: JSON.stringify({ title }),
-      }, 15000);
-      if (!res.ok) throw new Error('Failed to create conversation');
-      const data: BackendConversationResource = await res.json();
-      return mapConversation(data);
-    } catch {
-      return null;
-    }
-  },
-
-  // ─── Messages ────────────────────────────────────────────────────
-  async getMessages(conversationId: string, apiKey?: string, gatewayUrl?: string): Promise<ChatMessage[]> {
-    const base = getBaseUrl(gatewayUrl);
-    try {
-      const res = await fetchWithTimeout(
-        `${base}/api/v1/conversations/${conversationId}/messages`,
-        { headers: authHeaders(apiKey) },
-      );
-      if (!res.ok) throw new Error(`API ${res.status}`);
-      const data: PageResponse<BackendMessageResource> = await res.json();
-      return (data.items || []).map(mapMessage);
-    } catch {
-      return [];
-    }
-  },
-
-  async sendMessage(conversationId: string, message: string, apiKey?: string, gatewayUrl?: string): Promise<ChatMessage | null> {
-    const base = getBaseUrl(gatewayUrl);
-    try {
-      const res = await fetchWithTimeout(
-        `${base}/api/v1/conversations/${conversationId}/messages`,
-        {
-          method: 'POST',
-          headers: authHeaders(apiKey),
-          body: JSON.stringify({ message }),
-        },
-        30000,
-      );
-      if (!res.ok) throw new Error('Failed to send message');
-      const data: BackendChatExecutionResponse = await res.json();
-      return {
-        id: data.id || `msg_${Date.now()}`,
-        conversation_id: conversationId,
-        role: 'assistant',
-        content: data.message,
-        timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
-      };
-    } catch {
-      return null;
-    }
-  },
-
-  // ─── Health ──────────────────────────────────────────────────────
-
-  async checkHealth(
-    _apiKey?: string,
-    gatewayUrl?: string,
-  ): Promise<boolean> {
-    const base = getBaseUrl(gatewayUrl);
-
-    try {
-      const res = await fetchWithTimeout(
-        base ? `${base}/health` : '/health',
-        {
-          method: 'GET',
-          cache: 'no-store',
-        },
-        5000,
-      );
-
-      return res.ok;
-    } catch {
-      return false;
-    }
-  },
-
 };
