@@ -127,7 +127,8 @@ export default function EvaluationPage() {
         <div className="p-4 border-b border-white/10 font-bold text-sm text-white">
           Historical Benchmark Runs
         </div>
-        <table className="w-full text-left text-sm text-zinc-300">
+        <div className="overflow-x-auto">
+          <table className="w-full text-left text-sm text-zinc-300">
           <thead className="bg-zinc-950/80 text-xs uppercase font-semibold text-zinc-400 border-b border-white/10">
             <tr>
               <th className="px-6 py-4">Run Name</th>
@@ -152,7 +153,8 @@ export default function EvaluationPage() {
               </tr>
             ))}
           </tbody>
-        </table>
+          </table>
+        </div>
       </div>
     </div>
   );

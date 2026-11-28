@@ -5,7 +5,7 @@ edition = "2024"
 
 [dependencies]
 types = { path = "../types" }
-chrono = { workspace = true }
+time = { workspace = true }
 uuid = { workspace = true }
 serde = { workspace = true }
 

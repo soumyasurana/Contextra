@@ -66,9 +66,12 @@ export default function DashboardPage() {
           ) : (
             <ul className="divide-y divide-white/10">
               {collections.slice(0, 5).map((collection) => (
-                <li key={collection.id} className="py-3 text-sm">
-                  <p className="wrap-anywhere font-medium text-white">{collection.name}</p>
-                  {collection.description && <p className="mt-1 wrap-anywhere text-xs text-zinc-400">{collection.description}</p>}
+                <li key={collection.id} className="flex items-start justify-between gap-3 py-3 text-sm">
+                  <div className="min-w-0">
+                    <p className="wrap-anywhere font-medium text-white">{collection.name}</p>
+                    {collection.description && <p className="mt-1 wrap-anywhere text-xs text-zinc-400 line-clamp-1">{collection.description}</p>}
+                  </div>
+                  <span className="shrink-0 font-mono text-xs text-zinc-400">{collection.documents_count} docs</span>
                 </li>
               ))}
             </ul>

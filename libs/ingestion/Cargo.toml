@@ -6,8 +6,8 @@ edition = "2024"
 [dependencies]
 embeddings = { path = "../embeddings" }
 errors = { path = "../errors" }
-pdf-extract = "0.7"
-scraper = "0.22"
+lopdf = { version = "0.47", default-features = false }
+scraper = { version = "0.29", default-features = false }
 serde_json = "1"
 storage = { path = "../storage" }
 types = { path = "../types" }
@@ -15,6 +15,7 @@ uuid = { version = "1", features = ["v7", "serde"] }
 
 [dev-dependencies]
 async-trait = "0.1"
+tempfile = { workspace = true }
 tokio = { version = "1", features = ["macros", "rt-multi-thread"] }
 
 [lints]

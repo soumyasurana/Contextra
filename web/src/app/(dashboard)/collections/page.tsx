@@ -35,7 +35,7 @@ export default function CollectionsPage() {
   const filteredCollections = collections.filter(
     (c) =>
       c.name.toLowerCase().includes(searchQuery.toLowerCase()) ||
-      c.description.toLowerCase().includes(searchQuery.toLowerCase())
+      (c.description || '').toLowerCase().includes(searchQuery.toLowerCase())
   );
 
   const handleCreate = async (e: React.FormEvent) => {
@@ -64,6 +64,14 @@ export default function CollectionsPage() {
     setName(col.name);
     setDescription(col.description);
     setCreateModalOpen(true);
+  };
+
+  const closeModal = () => {
+    setCreateModalOpen(false);
+    // Reset edit state so reopening "New Collection" doesn't show stale data
+    setEditingCol(null);
+    setName('');
+    setDescription('');
   };
 
   return (
@@ -197,7 +205,11 @@ export default function CollectionsPage() {
       {/* Create / Edit Modal */}
       <AnimatePresence>
         {createModalOpen && (
-          <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/75 backdrop-blur-md">
+          <div
+            className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/75 backdrop-blur-md"
+            onClick={(e) => { if (e.target === e.currentTarget) closeModal(); }}
+            onKeyDown={(e) => { if (e.key === 'Escape') closeModal(); }}
+          >
             <motion.div
               initial={{ opacity: 0, scale: 0.95 }}
               animate={{ opacity: 1, scale: 1 }}
@@ -210,7 +222,9 @@ export default function CollectionsPage() {
                   <span>{editingCol ? 'Edit Collection' : 'Create New Collection'}</span>
                 </h3>
                 <button
-                  onClick={() => setCreateModalOpen(false)}
+                  type="button"
+                  aria-label="Close modal"
+                  onClick={closeModal}
                   className="p-1 rounded-lg text-zinc-400 hover:text-white"
                 >
                   <X className="w-5 h-5" />
@@ -244,7 +258,7 @@ export default function CollectionsPage() {
                 <div className="flex items-center justify-end space-x-3 pt-4 border-t border-white/10">
                   <button
                     type="button"
-                    onClick={() => setCreateModalOpen(false)}
+                    onClick={closeModal}
                     className="px-4 py-2 bg-zinc-800 text-zinc-300 hover:text-white rounded-xl text-xs font-medium"
                   >
                     Cancel

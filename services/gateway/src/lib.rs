@@ -64,13 +64,13 @@ impl FromRef<AppState> for Arc<dyn GatewayService> {
 pub fn build_router(state: AppState) -> Router {
     let protected_api = Router::new()
         .route("/documents", get(list_documents).post(create_document))
-        .route("/documents/:document_id", get(get_document))
+        .route("/documents/{document_id}", get(get_document))
         .route(
             "/collections",
             get(list_collections).post(create_collection),
         )
         .route(
-            "/collections/:collection_id",
+            "/collections/{collection_id}",
             get(get_collection).patch(update_collection),
         )
         .route(
@@ -78,11 +78,11 @@ pub fn build_router(state: AppState) -> Router {
             get(list_conversations).post(create_conversation),
         )
         .route(
-            "/conversations/:conversation_id/messages",
+            "/conversations/{conversation_id}/messages",
             get(list_messages).post(execute_chat),
         )
         .route(
-            "/conversations/:conversation_id/messages/stream",
+            "/conversations/{conversation_id}/messages/stream",
             post(stream_chat),
         )
         .route_layer(middleware::from_fn_with_state(

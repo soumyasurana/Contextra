@@ -52,6 +52,13 @@ function DocumentRegistry() {
   const collectionNames = new Map(collections.map((collection) => [collection.id, collection.name]));
   const [isSubmitting, setIsSubmitting] = useState(false);
 
+  const closeUploadModal = () => {
+    setUploadModalOpen(false);
+    setName('');
+    setContent('');
+    setTargetCollection('');
+  };
+
   useEffect(() => {
     fetchDocuments();
     fetchCollections();
@@ -184,11 +191,13 @@ function DocumentRegistry() {
               <tbody className="divide-y divide-white/5">
                 {filteredDocs.map((doc) => (
                   <tr key={doc.id} className="hover:bg-white/[0.02] transition-colors group">
-                    <td className="px-6 py-4 font-medium text-white flex items-center space-x-3">
-                      <div className="w-8 h-8 rounded-lg bg-indigo-500/10 border border-indigo-500/20 flex items-center justify-center text-indigo-400 shrink-0">
-                        <FileCode className="w-4 h-4" />
+                    <td className="px-6 py-4 font-medium text-white">
+                      <div className="flex items-center space-x-3">
+                        <div className="w-8 h-8 rounded-lg bg-indigo-500/10 border border-indigo-500/20 flex items-center justify-center text-indigo-400 shrink-0">
+                          <FileCode className="w-4 h-4" />
+                        </div>
+                        <span className="truncate max-w-xs">{doc.name}</span>
                       </div>
-                      <span className="truncate max-w-xs">{doc.name}</span>
                     </td>
                     <td className="px-6 py-4 font-mono text-xs text-zinc-400">
                       {collectionNames.get(doc.collection_id) || doc.collection_name || "Unassigned"}
@@ -228,7 +237,11 @@ function DocumentRegistry() {
       {/* Ingest Modal */}
       <AnimatePresence>
         {uploadModalOpen && (
-          <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/75 backdrop-blur-md">
+          <div
+            className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/75 backdrop-blur-md"
+            onClick={(e) => { if (e.target === e.currentTarget && !isSubmitting) closeUploadModal(); }}
+            onKeyDown={(e) => { if (e.key === 'Escape' && !isSubmitting) closeUploadModal(); }}
+          >
             <motion.div
               initial={{ opacity: 0, scale: 0.95 }}
               animate={{ opacity: 1, scale: 1 }}
@@ -241,8 +254,11 @@ function DocumentRegistry() {
                   <span>Ingest Document via Gateway</span>
                 </h3>
                 <button
-                  onClick={() => setUploadModalOpen(false)}
-                  className="p-1 rounded-lg text-zinc-400 hover:text-white"
+                  type="button"
+                  aria-label="Close modal"
+                  disabled={isSubmitting}
+                  onClick={closeUploadModal}
+                  className="p-1 rounded-lg text-zinc-400 hover:text-white disabled:opacity-50"
                 >
                   <X className="w-5 h-5" />
                 </button>
@@ -296,8 +312,9 @@ function DocumentRegistry() {
                 <div className="flex items-center justify-end space-x-3 pt-4 border-t border-white/10">
                   <button
                     type="button"
-                    onClick={() => setUploadModalOpen(false)}
-                    className="px-4 py-2 bg-zinc-800 text-zinc-300 hover:text-white rounded-xl text-xs font-medium"
+                    disabled={isSubmitting}
+                    onClick={closeUploadModal}
+                    className="px-4 py-2 bg-zinc-800 text-zinc-300 hover:text-white rounded-xl text-xs font-medium disabled:opacity-50"
                   >
                     Cancel
                   </button>
@@ -319,7 +336,11 @@ function DocumentRegistry() {
       {/* Metadata Drawer */}
       <AnimatePresence>
         {selectedDoc && (
-          <div className="fixed inset-0 z-50 flex justify-end bg-black/60 backdrop-blur-sm">
+          <div
+            className="fixed inset-0 z-50 flex justify-end bg-black/60 backdrop-blur-sm"
+            onClick={(e) => { if (e.target === e.currentTarget) setSelectedDoc(null); }}
+            onKeyDown={(e) => { if (e.key === 'Escape') setSelectedDoc(null); }}
+          >
             <motion.div
               initial={{ x: '100%' }}
               animate={{ x: 0 }}
@@ -329,13 +350,15 @@ function DocumentRegistry() {
             >
               <div className="space-y-6">
                 <div className="flex items-center justify-between border-b border-white/10 pb-4">
-                  <div className="flex items-center space-x-2">
-                    <FileCode className="w-5 h-5 text-indigo-400" />
-                    <h3 className="text-base font-bold text-white truncate max-w-xs">{selectedDoc.name}</h3>
+                  <div className="flex items-center space-x-2 min-w-0">
+                    <FileCode className="w-5 h-5 text-indigo-400 shrink-0" />
+                    <h3 className="text-base font-bold text-white truncate">{selectedDoc.name}</h3>
                   </div>
                   <button
+                    type="button"
+                    aria-label="Close drawer"
                     onClick={() => setSelectedDoc(null)}
-                    className="p-1 rounded-lg text-zinc-400 hover:text-white"
+                    className="p-1 rounded-lg text-zinc-400 hover:text-white shrink-0"
                   >
                     <X className="w-5 h-5" />
                   </button>
@@ -343,13 +366,23 @@ function DocumentRegistry() {
 
                 <div className="space-y-3 text-xs">
                   <div className="p-3 rounded-xl bg-zinc-900 border border-white/5 space-y-2">
-                    <div className="flex justify-between text-zinc-400">
+                    <div className="flex justify-between gap-2 text-zinc-400">
                       <span>Document ID</span>
                       <span className="font-mono text-zinc-200 truncate max-w-[200px]">{selectedDoc.id}</span>
                     </div>
-                    <div className="flex justify-between text-zinc-400">
-                      <span>Collection ID</span>
-                      <span className="text-indigo-400 font-mono truncate max-w-[200px]">{selectedDoc.collection_id}</span>
+                    <div className="flex justify-between gap-2 text-zinc-400">
+                      <span>Collection</span>
+                      <span className="text-indigo-400 font-mono truncate max-w-[200px]">
+                        {collectionNames.get(selectedDoc.collection_id) || selectedDoc.collection_id || 'Unassigned'}
+                      </span>
+                    </div>
+                    <div className="flex justify-between gap-2 text-zinc-400">
+                      <span>Chunks</span>
+                      <span className="font-mono text-zinc-200">{selectedDoc.chunks_count}</span>
+                    </div>
+                    <div className="flex justify-between gap-2 text-zinc-400">
+                      <span>Size</span>
+                      <span className="font-mono text-zinc-200">{selectedDoc.file_size}</span>
                     </div>
                   </div>
 

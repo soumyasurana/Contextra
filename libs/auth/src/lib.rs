@@ -2,11 +2,11 @@ use argon2::{
     Argon2,
     password_hash::{PasswordHash, PasswordHasher, PasswordVerifier, SaltString},
 };
-use chrono::{Duration as ChronoDuration, Utc};
 use errors::ContextraError;
 use jsonwebtoken::{Algorithm, DecodingKey, EncodingKey, Header, Validation, decode, encode};
 use serde::{Deserialize, Serialize};
 use storage::api_key::{ApiKeyRecord, ApiKeyStore};
+use time::{Duration as TimeDuration, OffsetDateTime};
 use types::{OrgId, UserId};
 use uuid::Uuid;
 
@@ -92,14 +92,14 @@ pub struct JwtSessionManager {
     encoding_key: EncodingKey,
     decoding_key: DecodingKey,
     issuer: String,
-    token_ttl: ChronoDuration,
+    token_ttl: TimeDuration,
 }
 
 impl JwtSessionManager {
     pub fn new(
         secret: impl AsRef<[u8]>,
         issuer: impl Into<String>,
-        token_ttl: ChronoDuration,
+        token_ttl: TimeDuration,
     ) -> Self {
         let secret = secret.as_ref();
         Self {
@@ -111,7 +111,7 @@ impl JwtSessionManager {
     }
 
     pub fn issue_session_token(&self, context: &AuthContext) -> Result<String, ContextraError> {
-        let issued_at = Utc::now();
+        let issued_at = OffsetDateTime::now_utc();
         let expires_at = issued_at + self.token_ttl;
         let claims = Claims {
             sub: context.user_id.to_string(),
@@ -119,8 +119,8 @@ impl JwtSessionManager {
             org_id: Uuid::from(context.org_id),
             scopes: context.scopes.clone(),
             iss: self.issuer.clone(),
-            iat: issued_at.timestamp() as usize,
-            exp: expires_at.timestamp() as usize,
+            iat: issued_at.unix_timestamp() as usize,
+            exp: expires_at.unix_timestamp() as usize,
         };
 
         let mut header = Header::new(Algorithm::HS256);
@@ -211,7 +211,7 @@ mod tests {
     #[test]
     fn jwt_round_trip() -> Result<(), Box<dyn std::error::Error>> {
         let manager =
-            JwtSessionManager::new("session-secret", "contextra", ChronoDuration::minutes(30));
+            JwtSessionManager::new("session-secret", "contextra", TimeDuration::minutes(30));
         let context = auth_context();
 
         let token = manager.issue_session_token(&context)?;

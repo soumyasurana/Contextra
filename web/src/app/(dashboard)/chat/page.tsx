@@ -113,15 +113,28 @@ export default function ChatPage() {
       <form onSubmit={handleSend} className="space-y-2 border-t border-white/10 p-4 sm:px-6">
         {sendError && <p role="alert" className="text-sm text-rose-300">{sendError}</p>}
         <div className="flex items-end gap-2">
-          <textarea
-            aria-label="Message"
-            value={input}
-            onChange={(event) => setInput(event.target.value)}
-            rows={2}
-            readOnly={chatPending}
-            placeholder="Write a message…"
-            className="min-w-0 flex-1 resize-none rounded-xl border border-white/10 bg-zinc-900 px-3 py-2 text-sm"
-          />
+          <div className="relative min-w-0 flex-1">
+            <textarea
+              aria-label="Message"
+              value={input}
+              onChange={(event) => setInput(event.target.value)}
+              rows={2}
+              readOnly={chatPending}
+              placeholder="Write a message…"
+              onKeyDown={(event) => {
+                if ((event.metaKey || event.ctrlKey) && event.key === 'Enter') {
+                  event.preventDefault();
+                  if (!chatPending && input.trim()) {
+                    event.currentTarget.form?.requestSubmit();
+                  }
+                }
+              }}
+              className="w-full resize-none rounded-xl border border-white/10 bg-zinc-900 px-3 py-2 text-sm focus:border-indigo-500/50 focus:outline-none"
+            />
+            <span className="pointer-events-none absolute bottom-2 right-3 hidden text-[10px] text-zinc-600 sm:block">
+              ⌘↵ to send
+            </span>
+          </div>
           <button
             type="submit"
             disabled={!input.trim() || chatPending || Boolean(activeConversationId && (messagesLoading || messagesError))}

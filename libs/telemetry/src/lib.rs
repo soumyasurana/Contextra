@@ -69,7 +69,7 @@ pub fn init_telemetry(settings: &TelemetrySettings) {
     subscriber.init();
 }
 
-/// Creates a tracing span for a request, suitable for #[tracing::instrument] parent context or manual usage
+/// Creates a tracing span for a request, suitable for `#[tracing::instrument]` parent context or manual usage
 #[inline]
 pub fn span_for_request(request_id: &str) -> tracing::Span {
     tracing::info_span!("request", request_id = request_id)

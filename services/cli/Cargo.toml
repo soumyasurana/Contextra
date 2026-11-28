@@ -20,7 +20,7 @@ ingestion = { path = "../../libs/ingestion" }
 memory = { path = "../../libs/memory" }
 orchestration = { path = "../../libs/orchestration" }
 providers = { path = "../../libs/providers" }
-reqwest = { version = "0.12", features = ["json"] }
+reqwest = { version = "0.12", default-features = false, features = ["json", "rustls-tls"] }
 retrieval = { path = "../../libs/retrieval" }
 serde = { workspace = true, features = ["derive"] }
 serde_json = { workspace = true }

@@ -216,7 +216,11 @@ export default function PromptStudioPage() {
       {/* Create Template Modal */}
       <AnimatePresence>
         {createModalOpen && (
-          <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/75 backdrop-blur-md">
+          <div
+            className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/75 backdrop-blur-md"
+            onClick={(e) => { if (e.target === e.currentTarget) setCreateModalOpen(false); }}
+            onKeyDown={(e) => { if (e.key === 'Escape') setCreateModalOpen(false); }}
+          >
             <motion.div
               initial={{ opacity: 0, scale: 0.95 }}
               animate={{ opacity: 1, scale: 1 }}

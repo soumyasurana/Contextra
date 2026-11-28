@@ -28,7 +28,8 @@ export function TopNavbar() {
         <kbd className="ml-auto hidden shrink-0 rounded border border-zinc-700 px-1.5 text-xs text-zinc-400 sm:block">Ctrl / ⌘ K</kbd>
       </button>
 
-      <span className={`flex shrink-0 items-center gap-1.5 rounded-full border px-2.5 py-1 text-xs font-medium ${apiConnected ? 'border-emerald-500/20 text-emerald-400' : 'border-amber-500/20 text-amber-400'}`}>
+      <span className={`flex shrink-0 items-center gap-1.5 rounded-full border px-2.5 py-1 text-xs font-medium transition-colors ${apiConnected ? 'border-emerald-500/20 bg-emerald-500/5 text-emerald-400' : 'border-amber-500/20 bg-amber-500/5 text-amber-400'}`}>
+        <span className={`size-1.5 rounded-full ${apiConnected ? 'bg-emerald-400 animate-pulse' : 'bg-amber-400'}`} aria-hidden="true" />
         <Server className="size-3.5" />
         {apiConnected ? 'API online' : 'API offline'}
       </span>

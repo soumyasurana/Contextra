@@ -3,7 +3,8 @@ use errors::ContextraError;
 use scraper::{Html, Selector};
 use serde_json::json;
 use std::collections::HashMap;
-use std::path::{Path, PathBuf};
+use std::io::Read;
+use std::path::{Component, Path, PathBuf};
 use std::sync::Arc;
 use storage::vector_store::{VectorRecord, VectorStore};
 use types::{Chunk, CollectionId, Document, DocumentId, Metadata};
@@ -11,6 +12,271 @@ use uuid::Uuid;
 
 const DEFAULT_EMBEDDING_BATCH_SIZE: usize = 96;
 const DEFAULT_EMBEDDING_CONCURRENCY: usize = 4;
+const DEFAULT_MAX_FILE_BYTES: u64 = 50 * 1024 * 1024;
+const DEFAULT_MAX_EXTRACTED_BYTES: usize = 50 * 1024 * 1024;
+const DEFAULT_MAX_PDF_NESTING_DEPTH: usize = 128;
+const DEFAULT_MAX_COMPRESSION_RATIO: u64 = 100;
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct IngestionSecurityPolicy {
+    pub max_file_bytes: u64,
+    pub max_extracted_bytes: usize,
+    pub max_pdf_nesting_depth: usize,
+    pub max_compression_ratio: u64,
+    pub allow_symlinks: bool,
+    pub allowed_root: Option<PathBuf>,
+}
+
+impl Default for IngestionSecurityPolicy {
+    fn default() -> Self {
+        Self {
+            max_file_bytes: DEFAULT_MAX_FILE_BYTES,
+            max_extracted_bytes: DEFAULT_MAX_EXTRACTED_BYTES,
+            max_pdf_nesting_depth: DEFAULT_MAX_PDF_NESTING_DEPTH,
+            max_compression_ratio: DEFAULT_MAX_COMPRESSION_RATIO,
+            allow_symlinks: false,
+            allowed_root: None,
+        }
+    }
+}
+
+/// Validates a filesystem path before reading it for ingestion.
+///
+/// Rejects symlinks (unless explicitly permitted), non-regular files, files
+/// exceeding `max_file_bytes`, and paths that escape `allowed_root` via
+/// traversal or symlinked parent directories.
+pub fn validate_safe_path(
+    path: &Path,
+    policy: &IngestionSecurityPolicy,
+) -> Result<PathBuf, ContextraError> {
+    let metadata = std::fs::symlink_metadata(path).map_err(|error| {
+        ContextraError::Validation(format!(
+            "cannot inspect ingestion path '{}': {error}",
+            path.display()
+        ))
+    })?;
+
+    if !policy.allow_symlinks && metadata.file_type().is_symlink() {
+        return Err(ContextraError::Validation(format!(
+            "symlinks are not permitted during document ingestion: '{}'",
+            path.display()
+        )));
+    }
+
+    if !metadata.is_file() {
+        return Err(ContextraError::Validation(format!(
+            "ingestion path must be a regular file: '{}'",
+            path.display()
+        )));
+    }
+
+    if metadata.len() > policy.max_file_bytes {
+        return Err(ContextraError::Validation(format!(
+            "file '{}' exceeds maximum allowed size ({} > {} bytes)",
+            path.display(),
+            metadata.len(),
+            policy.max_file_bytes
+        )));
+    }
+
+    let canonical = std::fs::canonicalize(path).map_err(|error| {
+        ContextraError::Validation(format!(
+            "cannot canonicalize ingestion path '{}': {error}",
+            path.display()
+        ))
+    })?;
+
+    if let Some(root) = &policy.allowed_root {
+        let canonical_root = std::fs::canonicalize(root).map_err(|error| {
+            ContextraError::Validation(format!(
+                "cannot canonicalize allowed ingestion root '{}': {error}",
+                root.display()
+            ))
+        })?;
+        if !canonical.starts_with(&canonical_root) {
+            return Err(ContextraError::Validation(format!(
+                "path '{}' escapes allowed ingestion root '{}'",
+                path.display(),
+                root.display()
+            )));
+        }
+    }
+
+    Ok(canonical)
+}
+
+/// Validates an archive entry path against path traversal, absolute paths,
+/// Windows drive prefixes, and NUL bytes.
+pub fn validate_archive_entry_path(entry_name: &str) -> Result<PathBuf, ContextraError> {
+    if entry_name.is_empty() || entry_name.contains('\0') {
+        return Err(ContextraError::Validation(
+            "archive entry name is empty or contains NUL byte".to_string(),
+        ));
+    }
+
+    if entry_name.contains('\\') {
+        return Err(ContextraError::Validation(format!(
+            "archive entry '{entry_name}' contains disallowed backslash separator"
+        )));
+    }
+
+    let candidate = Path::new(entry_name);
+    let mut clean = PathBuf::new();
+    for component in candidate.components() {
+        match component {
+            Component::Normal(part) => clean.push(part),
+            Component::CurDir => {}
+            Component::ParentDir | Component::RootDir | Component::Prefix(_) => {
+                return Err(ContextraError::Validation(format!(
+                    "archive entry '{entry_name}' contains unsafe path component"
+                )));
+            }
+        }
+    }
+
+    if clean.as_os_str().is_empty() {
+        return Err(ContextraError::Validation(format!(
+            "archive entry '{entry_name}' resolves to an empty path"
+        )));
+    }
+
+    Ok(clean)
+}
+
+/// Validates compressed vs. uncompressed archive entry sizes against
+/// decompression-bomb limits.
+pub fn validate_decompression_bounds(
+    compressed_bytes: u64,
+    uncompressed_bytes: u64,
+    policy: &IngestionSecurityPolicy,
+) -> Result<(), ContextraError> {
+    if uncompressed_bytes > policy.max_extracted_bytes as u64 {
+        return Err(ContextraError::Validation(format!(
+            "extracted size ({uncompressed_bytes} bytes) exceeds maximum allowed ({} bytes)",
+            policy.max_extracted_bytes
+        )));
+    }
+
+    if uncompressed_bytes > 0 {
+        let ratio = uncompressed_bytes
+            .checked_div(compressed_bytes)
+            .unwrap_or(u64::MAX);
+        if ratio > policy.max_compression_ratio {
+            return Err(ContextraError::Validation(format!(
+                "suspicious compression ratio ({ratio}:1) exceeds maximum ({}:1)",
+                policy.max_compression_ratio
+            )));
+        }
+    }
+
+    Ok(())
+}
+
+fn read_bounded_bytes(
+    path: &Path,
+    policy: &IngestionSecurityPolicy,
+) -> Result<Vec<u8>, ContextraError> {
+    let safe_path = validate_safe_path(path, policy)?;
+    let file = std::fs::File::open(&safe_path)?;
+    let limit = policy.max_file_bytes.saturating_add(1);
+    let mut buffer = Vec::new();
+    file.take(limit).read_to_end(&mut buffer)?;
+
+    if buffer.len() as u64 > policy.max_file_bytes {
+        return Err(ContextraError::Validation(format!(
+            "file '{}' exceeds maximum allowed size ({} bytes)",
+            path.display(),
+            policy.max_file_bytes
+        )));
+    }
+
+    Ok(buffer)
+}
+
+fn read_bounded_utf8(
+    path: &Path,
+    policy: &IngestionSecurityPolicy,
+) -> Result<String, ContextraError> {
+    let bytes = read_bounded_bytes(path, policy)?;
+    String::from_utf8(bytes).map_err(|error| {
+        ContextraError::Validation(format!(
+            "file '{}' is not valid UTF-8: {error}",
+            path.display()
+        ))
+    })
+}
+
+fn validate_pdf_structure(
+    bytes: &[u8],
+    policy: &IngestionSecurityPolicy,
+) -> Result<(), ContextraError> {
+    if !bytes.starts_with(b"%PDF-") {
+        return Err(ContextraError::Validation(
+            "invalid PDF header: expected %PDF- signature".to_string(),
+        ));
+    }
+
+    // Bound object/array/dictionary nesting depth before handing off to pdf-extract.
+    let mut depth: usize = 0;
+    let mut in_literal_string = false;
+    let mut escaped = false;
+    let mut i = 0;
+
+    while i < bytes.len() {
+        let b = bytes[i];
+        if in_literal_string {
+            if escaped {
+                escaped = false;
+            } else if b == b'\\' {
+                escaped = true;
+            } else if b == b')' {
+                in_literal_string = false;
+            }
+            i += 1;
+            continue;
+        }
+
+        match b {
+            b'(' => {
+                in_literal_string = true;
+                i += 1;
+            }
+            b'<' if i + 1 < bytes.len() && bytes[i + 1] == b'<' => {
+                depth += 1;
+                if depth > policy.max_pdf_nesting_depth {
+                    return Err(ContextraError::Validation(format!(
+                        "PDF nesting depth exceeds maximum allowed ({})",
+                        policy.max_pdf_nesting_depth
+                    )));
+                }
+                i += 2;
+            }
+            b'>' if i + 1 < bytes.len() && bytes[i + 1] == b'>' => {
+                depth = depth.saturating_sub(1);
+                i += 2;
+            }
+            b'[' => {
+                depth += 1;
+                if depth > policy.max_pdf_nesting_depth {
+                    return Err(ContextraError::Validation(format!(
+                        "PDF nesting depth exceeds maximum allowed ({})",
+                        policy.max_pdf_nesting_depth
+                    )));
+                }
+                i += 1;
+            }
+            b']' => {
+                depth = depth.saturating_sub(1);
+                i += 1;
+            }
+            _ => {
+                i += 1;
+            }
+        }
+    }
+
+    Ok(())
+}
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct ParsedDocument {
@@ -36,7 +302,8 @@ pub struct PlainTextParser;
 
 impl Parser for PlainTextParser {
     fn parse_path(&self, path: &Path) -> Result<ParsedDocument, ContextraError> {
-        let content = std::fs::read_to_string(path)?;
+        let policy = IngestionSecurityPolicy::default();
+        let content = read_bounded_utf8(path, &policy)?;
         Ok(ParsedDocument::new(content, parser_metadata(path, "text")))
     }
 }
@@ -46,7 +313,8 @@ pub struct MarkdownParser;
 
 impl Parser for MarkdownParser {
     fn parse_path(&self, path: &Path) -> Result<ParsedDocument, ContextraError> {
-        let content = std::fs::read_to_string(path)?;
+        let policy = IngestionSecurityPolicy::default();
+        let content = read_bounded_utf8(path, &policy)?;
         Ok(ParsedDocument::new(
             content,
             parser_metadata(path, "markdown"),
@@ -59,12 +327,29 @@ pub struct PdfParser;
 
 impl Parser for PdfParser {
     fn parse_path(&self, path: &Path) -> Result<ParsedDocument, ContextraError> {
-        let content = pdf_extract::extract_text(path).map_err(|error| {
+        let policy = IngestionSecurityPolicy::default();
+        let bytes = read_bounded_bytes(path, &policy)?;
+        validate_pdf_structure(&bytes, &policy)?;
+        let document = lopdf::Document::load_mem(&bytes).map_err(|error| {
+            ContextraError::ProviderError(format!(
+                "failed to parse PDF '{}': {error}",
+                path.display()
+            ))
+        })?;
+        let pages: Vec<u32> = document.get_pages().keys().copied().collect();
+        let content = document.extract_text(&pages).map_err(|error| {
             ContextraError::ProviderError(format!(
                 "failed to extract text from PDF '{}': {error}",
                 path.display()
             ))
         })?;
+        if content.len() > policy.max_extracted_bytes {
+            return Err(ContextraError::Validation(format!(
+                "extracted PDF text from '{}' exceeds maximum allowed size ({} bytes)",
+                path.display(),
+                policy.max_extracted_bytes
+            )));
+        }
         Ok(ParsedDocument::new(content, parser_metadata(path, "pdf")))
     }
 }
@@ -74,7 +359,8 @@ pub struct HtmlParser;
 
 impl Parser for HtmlParser {
     fn parse_path(&self, path: &Path) -> Result<ParsedDocument, ContextraError> {
-        let html = std::fs::read_to_string(path)?;
+        let policy = IngestionSecurityPolicy::default();
+        let html = read_bounded_utf8(path, &policy)?;
         let document = Html::parse_document(&html);
         let selector =
             Selector::parse("title, h1, h2, h3, h4, h5, h6, p, li, pre").map_err(|error| {
@@ -823,5 +1109,95 @@ mod tests {
         fn model_name(&self) -> &str {
             "mock"
         }
+    }
+
+    #[test]
+    fn archive_entry_path_rejects_traversal_and_absolute_paths() {
+        assert!(validate_archive_entry_path("../etc/passwd").is_err());
+        assert!(validate_archive_entry_path("docs/../../secret.txt").is_err());
+        assert!(validate_archive_entry_path("/etc/passwd").is_err());
+        assert!(validate_archive_entry_path("dir\\file.txt").is_err());
+        assert!(validate_archive_entry_path("file\0.txt").is_err());
+        assert!(validate_archive_entry_path("").is_err());
+
+        let clean = validate_archive_entry_path("docs/./readme.md").unwrap();
+        assert_eq!(clean, PathBuf::from("docs/readme.md"));
+    }
+
+    #[test]
+    fn decompression_bounds_reject_bombs_and_oversized_entries() {
+        let policy = IngestionSecurityPolicy::default();
+        assert!(validate_decompression_bounds(10, 10_000, &policy).is_err());
+        assert!(validate_decompression_bounds(0, 100, &policy).is_err());
+        assert!(
+            validate_decompression_bounds(
+                1_000_000,
+                (policy.max_extracted_bytes as u64) + 1,
+                &policy
+            )
+            .is_err()
+        );
+        assert!(validate_decompression_bounds(100, 1_000, &policy).is_ok());
+    }
+
+    #[test]
+    fn pdf_structure_rejects_invalid_header_and_deep_nesting() {
+        let policy = IngestionSecurityPolicy {
+            max_pdf_nesting_depth: 16,
+            ..IngestionSecurityPolicy::default()
+        };
+
+        assert!(validate_pdf_structure(b"not a pdf", &policy).is_err());
+
+        let mut deep_pdf = b"%PDF-1.7\n".to_vec();
+        deep_pdf.extend(std::iter::repeat_n(b'[', 32));
+        deep_pdf.extend(std::iter::repeat_n(b']', 32));
+        assert!(validate_pdf_structure(&deep_pdf, &policy).is_err());
+
+        let valid_pdf = b"%PDF-1.7\n<< /Title (Nested [ok]) >>".to_vec();
+        assert!(validate_pdf_structure(&valid_pdf, &policy).is_ok());
+    }
+
+    #[test]
+    fn safe_path_rejects_oversized_files_and_root_escape() -> Result<(), Box<dyn std::error::Error>>
+    {
+        let dir = tempfile::tempdir()?;
+        let allowed_root = dir.path().join("allowed");
+        std::fs::create_dir_all(&allowed_root)?;
+        let inside = allowed_root.join("doc.txt");
+        std::fs::write(&inside, "hello world")?;
+
+        let outside = dir.path().join("outside.txt");
+        std::fs::write(&outside, "secret")?;
+
+        let root_policy = IngestionSecurityPolicy {
+            allowed_root: Some(allowed_root.clone()),
+            ..IngestionSecurityPolicy::default()
+        };
+        assert!(validate_safe_path(&inside, &root_policy).is_ok());
+        assert!(validate_safe_path(&outside, &root_policy).is_err());
+
+        let size_policy = IngestionSecurityPolicy {
+            max_file_bytes: 5,
+            ..IngestionSecurityPolicy::default()
+        };
+        assert!(validate_safe_path(&inside, &size_policy).is_err());
+
+        Ok(())
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn safe_path_rejects_symlinks() -> Result<(), Box<dyn std::error::Error>> {
+        let dir = tempfile::tempdir()?;
+        let target = dir.path().join("target.txt");
+        std::fs::write(&target, "content")?;
+        let link = dir.path().join("link.txt");
+        std::os::unix::fs::symlink(&target, &link)?;
+
+        let result = PlainTextParser.parse_path(&link);
+        assert!(result.is_err());
+
+        Ok(())
     }
 }

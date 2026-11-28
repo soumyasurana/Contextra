@@ -7,7 +7,7 @@ use async_trait::async_trait;
 use auth::{AuthContext, authenticate_api_key};
 use common::{
     pagination::Cursor,
-    time::{Clock, SystemClock},
+    time::{Clock, SystemClock, format_rfc3339},
 };
 use embeddings::{Embedding, EmbeddingError, EmbeddingProvider, OpenAIEmbeddingProvider};
 use errors::ContextraError;
@@ -232,7 +232,7 @@ impl GatewayService for ProductionGatewayService {
         }
         metadata.insert(
             "uploaded_at".into(),
-            serde_json::json!(SystemClock.now().to_rfc3339()),
+            serde_json::json!(format_rfc3339(SystemClock.now())),
         );
         metadata.insert(
             "file_size".into(),
@@ -316,7 +316,7 @@ impl GatewayService for ProductionGatewayService {
         let mut metadata = request.metadata;
         metadata.insert(
             "created_at".into(),
-            serde_json::json!(SystemClock.now().to_rfc3339()),
+            serde_json::json!(format_rfc3339(SystemClock.now())),
         );
         let collection = Collection {
             id: CollectionId::new(),
@@ -499,7 +499,7 @@ impl GatewayService for ProductionGatewayService {
                 ContextraError::ProviderError("The model returned an empty reply".into())
             })?;
 
-        let timestamp = serde_json::json!(SystemClock.now().to_rfc3339());
+        let timestamp = serde_json::json!(format_rfc3339(SystemClock.now()));
         let user_msg = Message {
             id: Uuid::now_v7(),
             conversation_id,

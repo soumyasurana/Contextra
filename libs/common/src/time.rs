@@ -1,16 +1,21 @@
-use chrono::{DateTime, Utc};
+use time::{OffsetDateTime, format_description::well_known::Rfc3339};
 
 pub trait Clock: Send + Sync {
-    fn now(&self) -> DateTime<Utc>;
+    fn now(&self) -> OffsetDateTime;
 }
 
 #[derive(Clone, Default)]
 pub struct SystemClock;
 
 impl Clock for SystemClock {
-    fn now(&self) -> DateTime<Utc> {
-        Utc::now()
+    fn now(&self) -> OffsetDateTime {
+        OffsetDateTime::now_utc()
     }
+}
+
+pub fn format_rfc3339(dt: OffsetDateTime) -> String {
+    dt.format(&Rfc3339)
+        .unwrap_or_else(|_| dt.unix_timestamp().to_string())
 }
 
 #[cfg(test)]
@@ -18,11 +23,11 @@ mod tests {
     use super::*;
 
     struct MockClock {
-        time: DateTime<Utc>,
+        time: OffsetDateTime,
     }
 
     impl Clock for MockClock {
-        fn now(&self) -> DateTime<Utc> {
+        fn now(&self) -> OffsetDateTime {
             self.time
         }
     }
@@ -30,16 +35,16 @@ mod tests {
     #[test]
     fn test_system_clock() {
         let clock = SystemClock;
-        let before = Utc::now();
+        let before = OffsetDateTime::now_utc();
         let now = clock.now();
-        let after = Utc::now();
+        let after = OffsetDateTime::now_utc();
         assert!(before <= now);
         assert!(now <= after);
     }
 
     #[test]
     fn test_mock_clock() {
-        let expected = Utc::now();
+        let expected = OffsetDateTime::now_utc();
         let clock = MockClock { time: expected };
         assert_eq!(clock.now(), expected);
     }

@@ -5,9 +5,9 @@ edition = "2024"
 
 [dependencies]
 argon2 = "0.5"
-chrono = { workspace = true }
+time = { workspace = true }
 errors = { path = "../errors" }
-jsonwebtoken = { version = "10", default-features = false, features = ["rust_crypto"] }
+jsonwebtoken = { version = "10", default-features = false, features = ["aws_lc_rs"] }
 serde = { workspace = true }
 storage = { path = "../storage" }
 types = { path = "../types" }

@@ -160,12 +160,17 @@ export default function RetrievalPage() {
           const isActive = idx === activeStep;
           const isDone = idx <= activeStep;
           return (
-            <motion.div
+            <motion.button
+              type="button"
               key={step.id}
+              onClick={() => { if (!isRunning) setActiveStep(idx); }}
               initial={{ opacity: 0, y: 10 }}
               animate={{ opacity: 1, y: 0 }}
               transition={{ delay: idx * 0.05 }}
-              className={`glass-card p-4 rounded-2xl border flex flex-col justify-between space-y-3 relative transition-all ${
+              aria-pressed={isActive}
+              className={`glass-card text-left p-4 rounded-2xl border flex flex-col justify-between space-y-3 relative transition-all ${
+                isRunning ? 'cursor-default' : 'cursor-pointer hover:border-indigo-500/40'
+              } ${
                 isActive
                   ? 'border-indigo-500 bg-indigo-600/15 shadow-xl shadow-indigo-500/20 scale-[1.02]'
                   : isDone
@@ -173,7 +178,7 @@ export default function RetrievalPage() {
                   : 'border-white/5 opacity-50'
               }`}
             >
-              <div className="flex items-center justify-between">
+              <div className="flex items-center justify-between w-full">
                 <span className="text-[10px] font-mono uppercase font-bold text-zinc-400">Step 0{idx + 1}</span>
                 {isDone && <CheckCircle2 className="w-4 h-4 text-emerald-400" />}
               </div>
@@ -183,11 +188,11 @@ export default function RetrievalPage() {
                 <p className="text-[10px] text-zinc-400 mt-1 line-clamp-2">{step.description}</p>
               </div>
 
-              <div className="pt-2 border-t border-white/5 flex items-center justify-between text-[10px] font-mono text-zinc-400">
+              <div className="pt-2 border-t border-white/5 flex items-center justify-between w-full text-[10px] font-mono text-zinc-400">
                 <span>Latency</span>
                 <span className="text-emerald-400 font-bold">{step.latency_ms} ms</span>
               </div>
-            </motion.div>
+            </motion.button>
           );
         })}
       </div>

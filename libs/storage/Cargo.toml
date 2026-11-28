@@ -4,11 +4,11 @@ version = "0.1.0"
 edition = "2024"
 
 [dependencies]
-sqlx = { version = "0.8", features = ["postgres", "runtime-tokio", "uuid", "json"] }
+sqlx = { version = "0.9", default-features = false, features = ["postgres", "runtime-tokio", "uuid", "json", "migrate", "derive", "macros"] }
 tokio = { version = "1", features = ["full"] }
 async-trait = "0.1"
 redis = { version = "0.25", features = ["aio", "tokio-comp"] }
-qdrant-client = { version = "1.18", features = ["serde", "uuid"] }
+qdrant-client = { version = "1.20", default-features = false, features = ["serde", "uuid"] }
 types = { path = "../types" }
 errors = { path = "../errors" }
 uuid = { version = "1", features = ["v7", "serde"] }
